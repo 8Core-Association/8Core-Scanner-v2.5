@@ -50,37 +50,62 @@ try {
 
 $accounts = [];
 
-// Direktoriji u /home koji se uvijek isključuju
-$homeExclude = ['8core_quarantine', 'lost+found'];
+$sysExclude = [
+    'root', 'nobody', 'mail', 'mysql', 'apache', 'nginx',
+    'cwp', 'cwpsvc', '8core_quarantine', 'lost+found',
+];
 
 if (is_admin()) {
-    // Primarni izvor: stvarni direktoriji u /home
+    // 1. Primarni: scandir('/home') — radi samo kad web user ima pravo čitanja
     if (is_dir('/home') && is_readable('/home')) {
         foreach (scandir('/home') as $entry) {
             if ($entry === '.' || $entry === '..') continue;
             if ($entry[0] === '.') continue;
-            if (in_array($entry, $homeExclude, true)) continue;
+            if (in_array($entry, $sysExclude, true)) continue;
+            if (!preg_match('/^[a-zA-Z0-9._-]+$/', $entry)) continue;
             if (is_dir('/home/' . $entry)) {
                 $accounts[] = $entry;
             }
         }
-        sort($accounts);
     }
 
-    // Fallback / dopuna: accounti iz findings koji nisu u /home
-    try {
-        $fromDb = $pdo->query("
-            SELECT DISTINCT account_name
-            FROM findings
-            WHERE account_name IS NOT NULL AND account_name != ''
-            ORDER BY account_name
-        ")->fetchAll(PDO::FETCH_COLUMN);
-        foreach ($fromDb as $acc) {
-            if (!in_array($acc, $accounts, true)) {
-                $accounts[] = $acc;
+    // 2. Fallback: /etc/passwd — čitljiv svim korisnicima, pouzdan na shared hostingu
+    if (empty($accounts) && is_readable('/etc/passwd')) {
+        $lines = file('/etc/passwd', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        if ($lines !== false) {
+            foreach ($lines as $line) {
+                $parts = explode(':', $line);
+                if (count($parts) < 6) continue;
+                $uname   = $parts[0];
+                $homeDir = $parts[5];
+                if (strpos($homeDir, '/home/') !== 0) continue;
+                if (!preg_match('/^[a-zA-Z0-9._-]+$/', $uname)) continue;
+                if (in_array($uname, $sysExclude, true)) continue;
+                if (!in_array($uname, $accounts, true)) {
+                    $accounts[] = $uname;
+                }
             }
         }
-    } catch (Throwable $e) {}
+    }
+
+    // 3. Fallback: findings.account_name — zadnja opcija, npr. nakon migracije
+    if (empty($accounts)) {
+        try {
+            $fromDb = $pdo->query("
+                SELECT DISTINCT account_name
+                FROM findings
+                WHERE account_name IS NOT NULL AND account_name != ''
+                ORDER BY account_name
+            ")->fetchAll(PDO::FETCH_COLUMN);
+            foreach ($fromDb as $acc) {
+                if (!preg_match('/^[a-zA-Z0-9._-]+$/', $acc)) continue;
+                if (in_array($acc, $sysExclude, true)) continue;
+                if (!in_array($acc, $accounts, true)) {
+                    $accounts[] = $acc;
+                }
+            }
+        } catch (Throwable $e) {}
+    }
 
     sort($accounts);
 } else {
