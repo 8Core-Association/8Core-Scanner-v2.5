@@ -66,7 +66,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 2) {
     $dbUser           = trim($_POST['db_user']            ?? '');
     $dbPass           = $_POST['db_pass']                 ?? '';
     $dbCharset        = trim($_POST['db_charset']         ?? 'utf8mb4');
-    $webAppPath       = trim($_POST['web_app_path']       ?? $detectedWebPath);
+    $webAppPath       = $detectedWebPath;
     $webAppUrl        = rtrim(trim($_POST['web_app_url']  ?? $detectedWebUrl), '/');
     $rootEngPath      = trim($_POST['root_eng_path']         ?? '/root/8core_scanner');
     $quarPath         = trim($_POST['quarantine_base_path']  ?? '/home/8core_quarantine');
@@ -78,6 +78,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 2) {
 
     if ($dbName === '')    $errors[] = 'Naziv baze je obavezan.';
     if ($dbUser === '')    $errors[] = 'Korisnik baze je obavezan.';
+    if ($webAppUrl === '') $errors[] = 'Web URL aplikacije je obavezan.';
     if ($adminUser === '') $errors[] = 'Admin username je obavezan.';
     if (strlen($adminPass) < 8) $errors[] = 'Admin lozinka mora imati najmanje 8 znakova.';
     if ($adminPass !== $adminPass2) $errors[] = 'Lozinke se ne podudaraju.';
@@ -494,8 +495,8 @@ mv <?= htmlspecialchars(rtrim($webAppPath, '/'), ENT_QUOTES, 'UTF-8') ?>/install
 
         <div class="field">
           <label>Web aplikacija — putanja (WEB_APP_PATH)</label>
-          <input type="text" name="web_app_path" value="<?= htmlspecialchars($_POST['web_app_path'] ?? $detectedWebPath, ENT_QUOTES) ?>">
-          <div class="hint">Detektirano automatski iz lokacije installera. Mijenjajte samo ako nije ispravno.</div>
+          <input type="text" name="web_app_path" value="<?= htmlspecialchars($detectedWebPath, ENT_QUOTES) ?>" readonly style="opacity:.6;cursor:not-allowed;">
+          <div class="hint">Auto-detektirano iz lokacije installera. Preseli fajlove na željenu lokaciju <em>prije</em> pokretanja installera.</div>
         </div>
         <div class="field">
           <label>Web aplikacija — URL</label>
