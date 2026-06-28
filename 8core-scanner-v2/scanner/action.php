@@ -8,7 +8,15 @@
  * distribuirati ili mijenjati bez izričitog dopuštenja autora.
  */
 require __DIR__ . '/includes/auth.php';
+require __DIR__ . '/includes/helpers.php';
 require_login();
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
+    exit;
+}
+
+csrf_verify();
 
 $action = isset($_POST['action']) ? $_POST['action'] : '';
 $note   = isset($_POST['note'])   ? trim($_POST['note']) : '';
@@ -53,6 +61,5 @@ foreach ($ids as $id) {
     ")->execute([$id, $action, $note, $user['username']]);
 }
 
-$back = isset($_SERVER['HTTP_REFERER']) ? $_SERVER['HTTP_REFERER'] : 'index.php';
-header('Location: ' . $back);
+header('Location: index.php');
 exit;

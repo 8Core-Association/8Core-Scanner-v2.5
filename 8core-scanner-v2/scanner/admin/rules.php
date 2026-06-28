@@ -47,7 +47,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
 
 /* ── POST handleri ── */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-
+    csrf_verify();
     if ($formAction === 'create' || $formAction === 'update') {
         $name       = trim($_POST['name']        ?? '');
         $desc       = trim($_POST['description'] ?? '');
@@ -260,6 +260,7 @@ $activeRules = (int)$pdo->query("SELECT COUNT(*) FROM scanner_rules WHERE active
       <p class="rules-help-text">Stupci: name, type, pattern, extensions, risk, active (0/1)</p>
       <form method="post" enctype="multipart/form-data" class="form-row">
         <input type="hidden" name="form_action" value="import">
+        <?= csrf_field() ?>
         <input type="file" name="csv_file" accept=".csv" required>
         <button type="submit" class="btn btn-primary btn-sm">Uvezi</button>
         <button type="button" class="btn btn-ghost btn-sm" onclick="toggleEl('form-import')">Zatvori</button>
@@ -271,6 +272,7 @@ $activeRules = (int)$pdo->query("SELECT COUNT(*) FROM scanner_rules WHERE active
       <h2><?= $editRule ? 'Uredi pravilo #' . (int)$editRule['id'] : 'Novo pravilo' ?></h2>
       <form method="post" class="rules-form" id="rule-form">
         <input type="hidden" name="form_action" value="<?= $editRule ? 'update' : 'create' ?>">
+        <?= csrf_field() ?>
         <?php if ($editRule): ?>
           <input type="hidden" name="id" value="<?= (int)$editRule['id'] ?>">
         <?php endif; ?>
@@ -353,6 +355,7 @@ $activeRules = (int)$pdo->query("SELECT COUNT(*) FROM scanner_rules WHERE active
               <form method="post" class="inline-form">
                 <input type="hidden" name="form_action" value="toggle">
                 <input type="hidden" name="id" value="<?= (int)$rule['id'] ?>">
+                <?= csrf_field() ?>
                 <button type="submit" class="toggle-btn <?= $rule['active'] ? 'toggle-on' : 'toggle-off' ?>"
                         title="<?= $rule['active'] ? 'Klikni za deaktivaciju' : 'Klikni za aktivaciju' ?>">
                   <span class="toggle-dot"></span>
@@ -376,11 +379,13 @@ $activeRules = (int)$pdo->query("SELECT COUNT(*) FROM scanner_rules WHERE active
                 <form method="post" class="inline-form">
                   <input type="hidden" name="form_action" value="copy">
                   <input type="hidden" name="id" value="<?= (int)$rule['id'] ?>">
+                  <?= csrf_field() ?>
                   <button type="submit" class="btn btn-ghost btn-sm">Kopiraj</button>
                 </form>
                 <form method="post" class="inline-form" onsubmit="return confirm('Obrisati pravilo?')">
                   <input type="hidden" name="form_action" value="delete">
                   <input type="hidden" name="id" value="<?= (int)$rule['id'] ?>">
+                  <?= csrf_field() ?>
                   <button type="submit" class="btn btn-danger btn-sm">Obriši</button>
                 </form>
               </div>

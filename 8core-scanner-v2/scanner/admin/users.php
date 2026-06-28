@@ -15,6 +15,7 @@ $message     = '';
 $messageType = 'ok';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    csrf_verify();
     $formAction = $_POST['form_action'] ?? '';
 
     if ($formAction === 'create') {
@@ -157,6 +158,7 @@ foreach ($rows as $r) {
       <h2>Dodaj korisnika</h2>
       <form method="post">
         <input type="hidden" name="form_action" value="create">
+        <?= csrf_field() ?>
         <div class="form-row" style="flex-wrap:wrap;gap:8px;">
           <input type="text"     name="username" placeholder="username" required style="flex:1;min-width:130px;">
           <input type="password" name="password" placeholder="password" required style="flex:1;min-width:130px;">
@@ -224,6 +226,7 @@ foreach ($rows as $r) {
               <form method="post" style="display:flex;gap:5px;align-items:center;">
                 <input type="hidden" name="form_action" value="email">
                 <input type="hidden" name="id" value="<?= (int)$u['id'] ?>">
+                <?= csrf_field() ?>
                 <input type="email" name="email" value="<?= h($u['email'] ?? '') ?>"
                        placeholder="email@domena.hr"
                        style="padding:5px 8px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);min-width:160px;">
@@ -250,6 +253,7 @@ foreach ($rows as $r) {
               <form method="post">
                 <input type="hidden" name="form_action" value="accounts">
                 <input type="hidden" name="id" value="<?= (int)$u['id'] ?>">
+                <?= csrf_field() ?>
                 <div class="accounts-grid">
                   <?php foreach ($availableAccounts as $acc): ?>
                     <label class="account-check">
@@ -281,6 +285,7 @@ foreach ($rows as $r) {
               <form method="post" style="display:inline">
                 <input type="hidden" name="form_action" value="toggle">
                 <input type="hidden" name="id" value="<?= (int)$u['id'] ?>">
+                <?= csrf_field() ?>
                 <button type="submit" class="btn btn-ghost btn-sm">
                   <?= $u['active'] ? 'Deaktiviraj' : 'Aktiviraj' ?>
                 </button>
@@ -288,6 +293,7 @@ foreach ($rows as $r) {
               <form method="post" style="display:inline;display:flex;gap:5px;align-items:center;">
                 <input type="hidden" name="form_action" value="password">
                 <input type="hidden" name="id" value="<?= (int)$u['id'] ?>">
+                <?= csrf_field() ?>
                 <input type="password" name="password" placeholder="nova lozinka"
                        style="padding:5px 8px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);" required>
                 <button type="submit" class="btn btn-ghost btn-sm">Postavi</button>
@@ -297,6 +303,7 @@ foreach ($rows as $r) {
                     onsubmit="return confirm('Trajno obrisati korisnika <?= h(addslashes($u['username'])) ?>?')">
                 <input type="hidden" name="form_action" value="delete">
                 <input type="hidden" name="id" value="<?= (int)$u['id'] ?>">
+                <?= csrf_field() ?>
                 <button type="submit" class="btn btn-danger btn-sm">Ukloni</button>
               </form>
               <?php endif; ?>

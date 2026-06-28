@@ -163,6 +163,7 @@ $rootUpdateScript  = generate_root_update_script($config, $packageVersion);
 
 // ── POST: Primjena web updatea ─────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'apply_web') {
+    csrf_verify();
     $tmpDir = $_POST['tmp_dir'] ?? '';
     $tmpDir = realpath($tmpDir);
     if (!$tmpDir || !is_dir($tmpDir) || strpos($tmpDir, sys_get_temp_dir()) !== 0) {
@@ -202,13 +203,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'apply
             } catch (Throwable $e) {}
         }
         // Obriši temp
-        array_map('unlink', glob("$tmpDir/scanner/install/migrations/*.sql") ?: []);
+        if ($tmpDir && is_dir($tmpDir)) {
+            $iter = new RecursiveIteratorIterator(
+                new RecursiveDirectoryIterator($tmpDir, RecursiveDirectoryIterator::SKIP_DOTS),
+                RecursiveIteratorIterator::CHILD_FIRST
+            );
+            foreach ($iter as $f) { $f->isDir() ? rmdir($f->getRealPath()) : unlink($f->getRealPath()); }
+            rmdir($tmpDir);
+        }
+        unset($_SESSION['update_tmp_dir']);
     }
     $view = 'applied';
 }
 
 // ── POST: Primjena DB migracija ────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'apply_migrations') {
+    csrf_verify();
     $pending = load_pending_migrations($pdo);
     if (empty($pending)) {
         $messages[] = ['ok' => true, 'text' => 'Nema pending migracija.'];
@@ -223,6 +233,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'apply
 
 // ── POST: Upload i dry-run ─────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'upload') {
+    csrf_verify();
     $file = $_FILES['update_zip'] ?? null;
     if (!$file || $file['error'] !== UPLOAD_ERR_OK) {
         $messages[] = ['ok' => false, 'text' => 'Upload fajla nije uspio.'];
@@ -391,6 +402,7 @@ code { background:var(--bg); padding:1px 5px; border-radius:4px; font-size:12px;
           <form method="post">
             <input type="hidden" name="action" value="apply_web">
             <input type="hidden" name="tmp_dir" value="<?= h($tmpDirForApply) ?>">
+            <?= csrf_field() ?>
             <button type="submit" class="btn btn-primary" onclick="return confirm('Primijeniti web update?')">Primijeni web update</button>
           </form>
           <a href="update.php" class="btn btn-ghost">Odustani</a>
@@ -426,6 +438,7 @@ code { background:var(--bg); padding:1px 5px; border-radius:4px; font-size:12px;
       </div>
       <form method="post" enctype="multipart/form-data">
         <input type="hidden" name="action" value="upload">
+        <?= csrf_field() ?>
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
           <input type="file" name="update_zip" accept=".zip" required style="font-size:13px;">
           <button type="submit" class="btn btn-primary">Upload i dry-run</button>
@@ -478,6 +491,7 @@ code { background:var(--bg); padding:1px 5px; border-radius:4px; font-size:12px;
         <div style="margin-top:14px;">
           <form method="post" onsubmit="return confirm('Primijeniti <?= count($pendingMigrations) ?> pending migracij(a)?')">
             <input type="hidden" name="action" value="apply_migrations">
+            <?= csrf_field() ?>
             <button type="submit" class="btn btn-primary">Primijeni pending migracije (<?= count($pendingMigrations) ?>)</button>
           </form>
         </div>

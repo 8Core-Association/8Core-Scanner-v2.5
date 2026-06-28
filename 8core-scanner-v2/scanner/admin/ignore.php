@@ -25,6 +25,7 @@ $CATEGORIES = [
 $formAction = $_POST['form_action'] ?? '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    csrf_verify();
 
     if ($formAction === 'add') {
         $category = $_POST['category'] ?? '';
@@ -133,6 +134,7 @@ $items = $stmt->fetchAll();
       <form method="post" class="form-row">
         <input type="hidden" name="form_action" value="add">
         <input type="hidden" name="category"    value="<?= h($activeTab) ?>">
+        <?= csrf_field() ?>
         <input type="text" name="value" required
                placeholder="<?php
                   if ($activeTab === 'file') echo 'npr. /var/www/html/wp-config.php';
@@ -183,6 +185,7 @@ $items = $stmt->fetchAll();
                 <input type="hidden" name="form_action" value="delete">
                 <input type="hidden" name="id"          value="<?= (int)$item['id'] ?>">
                 <input type="hidden" name="category"    value="<?= h($activeTab) ?>">
+                <?= csrf_field() ?>
                 <button type="submit" class="btn btn-danger btn-sm">Obriši</button>
               </form>
             </td>

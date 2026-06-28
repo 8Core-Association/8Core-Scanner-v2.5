@@ -1,10 +1,13 @@
 #!/bin/bash
 # ==========================================================
-# 8Core IOC Scanner v3.2
+# 8Core IOC Scanner v3.3
 # Copyright (c) 2026 8Core
 # Author: Tomislav Galić / 8Core
 # Web: https://8core.hr
 # Output: MariaDB + live tail log
+# Novosti v3.3: DB-driven pravila iz scanner_rules,
+#               ignore lista iz scanner_ignore_list,
+#               poboljšani sql_escape
 # ==========================================================
 
 BASE="/home"
@@ -84,8 +87,9 @@ mysql_run() {
   mysql -h "$DB_HOST" -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" --default-character-set="${DB_CHARSET:-utf8mb4}" -N -B -e "$1"
 }
 
+# Stripa null bajtove i escapeuje single-quote za SQL string literal
 sql_escape() {
-  printf "%s" "$1" | sed "s/'/''/g"
+  printf "%s" "$1" | tr -d '\000' | sed "s/'/''/g"
 }
 
 guess_source() {
@@ -105,7 +109,7 @@ guess_source() {
   esac
 }
 
-log "8Core IOC Scanner v3.2 pokrenut"
+log "8Core IOC Scanner v3.3 pokrenut"
 log "Base: $BASE"
 log "Target tip: $TARGET_TYPE"
 log "Target vrijednost: $TARGET_VALUE"
@@ -199,6 +203,67 @@ SELECT LAST_INSERT_ID();
 
 log "Scan ID: $SCAN_ID"
 
+# ── Ignore lista ─────────────────────────────────────────────────────────────
+IGNORE_FILES=()
+IGNORE_PATHS=()
+IGNORE_HASHES=()
+IGNORE_USERS=()
+
+load_ignore_lists() {
+  local raw
+
+  raw=$(mysql_run "SELECT value FROM scanner_ignore_list WHERE category='file';" 2>/dev/null)
+  [ -n "$raw" ] && mapfile -t IGNORE_FILES <<< "$raw"
+
+  raw=$(mysql_run "SELECT value FROM scanner_ignore_list WHERE category='path';" 2>/dev/null)
+  [ -n "$raw" ] && mapfile -t IGNORE_PATHS <<< "$raw"
+
+  raw=$(mysql_run "SELECT value FROM scanner_ignore_list WHERE category='hash';" 2>/dev/null)
+  [ -n "$raw" ] && mapfile -t IGNORE_HASHES <<< "$raw"
+
+  raw=$(mysql_run "SELECT value FROM scanner_ignore_list WHERE category='user';" 2>/dev/null)
+  [ -n "$raw" ] && mapfile -t IGNORE_USERS <<< "$raw"
+
+  log "Ignore lista učitana: ${#IGNORE_FILES[@]} fajlova, ${#IGNORE_PATHS[@]} putanja, ${#IGNORE_HASHES[@]} hasheva, ${#IGNORE_USERS[@]} korisnika"
+}
+
+is_ignored() {
+  local file="$1"
+  local sha="$2"
+  local entry
+
+  # Provjera točne putanje fajla
+  for entry in "${IGNORE_FILES[@]}"; do
+    [ -z "$entry" ] && continue
+    [ "$file" = "$entry" ] && return 0
+  done
+
+  # Provjera path prefiksa
+  for entry in "${IGNORE_PATHS[@]}"; do
+    [ -z "$entry" ] && continue
+    case "$file" in "${entry}"*) return 0 ;; esac
+  done
+
+  # Provjera sha256 hasha
+  if [ -n "$sha" ]; then
+    for entry in "${IGNORE_HASHES[@]}"; do
+      [ -z "$entry" ] && continue
+      [ "$sha" = "$entry" ] && return 0
+    done
+  fi
+
+  # Provjera account/korisnika (3. segment putanje: /home/<account>/...)
+  local acc
+  acc=$(echo "$file" | awk -F/ '{print $3}')
+  for entry in "${IGNORE_USERS[@]}"; do
+    [ -z "$entry" ] && continue
+    [ "$acc" = "$entry" ] && return 0
+  done
+
+  return 1
+}
+
+# ── Umetanje nalaza u bazu ───────────────────────────────────────────────────
 insert_finding() {
   local rule="$1"
   local risk="$2"
@@ -230,10 +295,17 @@ insert_finding() {
   source_guess="${source%%|*}"
   source_type="${source##*|}"
 
-  if [ "$risk" = "HIGH" ] || [ "$risk" = "CRITICAL" ]; then
+  # SHA256: uvijek za HIGH/CRITICAL i kad postoji hash ignore lista
+  if [ "$risk" = "HIGH" ] || [ "$risk" = "CRITICAL" ] || [ "${#IGNORE_HASHES[@]}" -gt 0 ]; then
     sha=$(sha256sum "$file" 2>/dev/null | awk '{print $1}')
   else
     sha=""
+  fi
+
+  # Provjera ignore liste — preskoči ako je ignorirano
+  if is_ignored "$file" "$sha"; then
+    log "IGNORIRANO $file"
+    return 0
   fi
 
   mysql_run "
@@ -271,6 +343,15 @@ insert_finding() {
   log "NAĐENO [$risk] $rule :: $file"
 }
 
+# ── Pomoćnik: find s automatskim quarantine prune ────────────────────────────
+_scan_find() {
+  if [ -n "$QUARANTINE_BASE_PATH" ] && [[ "$QUARANTINE_BASE_PATH" == "$BASE"* ]]; then
+    find "$BASE" -path "$QUARANTINE_BASE_PATH" -prune -o "$@" -print 2>/dev/null
+  else
+    find "$BASE" "$@" 2>/dev/null
+  fi
+}
+
 scan_pattern() {
   local title="$1"
   local risk="$2"
@@ -278,18 +359,15 @@ scan_pattern() {
 
   log "Skeniranje: $title [$risk]"
 
-  # Isključi QUARANTINE_BASE_PATH iz skeniranja ako je definiran i unutar BASE
-  if [ -n "$QUARANTINE_BASE_PATH" ] && [[ "$QUARANTINE_BASE_PATH" == "$BASE"* ]]; then
-    find "$BASE" -path "$QUARANTINE_BASE_PATH" -prune -o "$@" -print 2>/dev/null | while IFS= read -r file; do
-      insert_finding "$title" "$risk" "$file"
-    done
-  else
-    find "$BASE" "$@" 2>/dev/null | while IFS= read -r file; do
-      insert_finding "$title" "$risk" "$file"
-    done
-  fi
+  _scan_find "$@" | while IFS= read -r file; do
+    insert_finding "$title" "$risk" "$file"
+  done
 }
 
+# ── Učitaj ignore listu prije skeniranja ─────────────────────────────────────
+load_ignore_lists
+
+# ── Ugrađena pravila (hardkodirana, uvijek aktivna) ───────────────────────────
 scan_pattern "filefuns.php" "CRITICAL" \
   -type f -name "filefuns.php"
 
@@ -315,23 +393,122 @@ scan_pattern "cache.php sumnjive lokacije" "MEDIUM" \
 
 log "Skeniranje: poznati command shell indikatori [HIGH]"
 
-if [ -n "$QUARANTINE_BASE_PATH" ] && [[ "$QUARANTINE_BASE_PATH" == "$BASE"* ]]; then
-  find "$BASE" -path "$QUARANTINE_BASE_PATH" -prune -o \
-    -type f \( -name "*.php" -o -name "*.PHP" -o -name "*.Php" -o -name "*.pHp" -o -name "*.phtml" -o -name "*.php5" -o -name "*.phar" \) \
-    -print 2>/dev/null | \
-    xargs -r grep -IlE "shell_exec|passthru|popen|proc_open|base64_decode|gzinflate|str_rot13|@eval|eval\(" 2>/dev/null | \
-    while IFS= read -r file; do
-      insert_finding "poznati command shell indikatori" "HIGH" "$file"
-    done
-else
-  find "$BASE" \
-    -type f \( -name "*.php" -o -name "*.PHP" -o -name "*.Php" -o -name "*.pHp" -o -name "*.phtml" -o -name "*.php5" -o -name "*.phar" \) \
-    -exec grep -IlE "shell_exec|passthru|popen|proc_open|base64_decode|gzinflate|str_rot13|@eval|eval\(" {} \; \
-    2>/dev/null | while IFS= read -r file; do
-      insert_finding "poznati command shell indikatori" "HIGH" "$file"
-    done
-fi
+_scan_find \
+  -type f \( -name "*.php" -o -name "*.PHP" -o -name "*.Php" -o -name "*.pHp" -o -name "*.phtml" -o -name "*.php5" -o -name "*.phar" \) | \
+  xargs -r grep -IlE "shell_exec|passthru|popen|proc_open|base64_decode|gzinflate|str_rot13|@eval|eval\(" 2>/dev/null | \
+  while IFS= read -r file; do
+    insert_finding "poznati command shell indikatori" "HIGH" "$file"
+  done
 
+# ── Dinamička pravila iz baze (scanner_rules, active=1) ──────────────────────
+run_dynamic_rules() {
+  log "Pokretanje dinamičkih pravila iz baze..."
+
+  local rules_raw
+  rules_raw=$(mysql_run "SELECT id, name, type, pattern, IFNULL(extensions,''), risk FROM scanner_rules WHERE active=1 ORDER BY id ASC;" 2>/dev/null)
+
+  if [ -z "$rules_raw" ]; then
+    log "Nema aktivnih dinamičkih pravila u bazi."
+    return 0
+  fi
+
+  local count=0
+  while IFS=$'\t' read -r rule_id rule_name rule_type rule_pattern rule_exts rule_risk; do
+    [ -z "$rule_id" ] && continue
+
+    log "Dinamičko pravilo [$rule_risk] $rule_name (tip: $rule_type)"
+    count=$((count + 1))
+
+    case "$rule_type" in
+
+      filename)
+        _scan_find -type f -name "$rule_pattern" | while IFS= read -r file; do
+          insert_finding "$rule_name" "$rule_risk" "$file"
+        done
+        ;;
+
+      path)
+        _scan_find -type f -path "*${rule_pattern}*" | while IFS= read -r file; do
+          insert_finding "$rule_name" "$rule_risk" "$file"
+        done
+        ;;
+
+      regex)
+        _scan_find -type f -regextype posix-extended -regex "$rule_pattern" | while IFS= read -r file; do
+          insert_finding "$rule_name" "$rule_risk" "$file"
+        done
+        ;;
+
+      extension)
+        local ext ext_args=() first=1
+        for ext in $rule_pattern $rule_exts; do
+          [ -z "$ext" ] && continue
+          if [ "$first" -eq 1 ]; then
+            ext_args+=( -name "*.${ext}" )
+            first=0
+          else
+            ext_args+=( -o -name "*.${ext}" )
+          fi
+        done
+        if [ "${#ext_args[@]}" -gt 0 ]; then
+          _scan_find -type f \( "${ext_args[@]}" \) | while IFS= read -r file; do
+            insert_finding "$rule_name" "$rule_risk" "$file"
+          done
+        fi
+        ;;
+
+      regex_content)
+        local ext ext_args=() first=1
+        if [ -n "$rule_exts" ]; then
+          for ext in $rule_exts; do
+            [ -z "$ext" ] && continue
+            if [ "$first" -eq 1 ]; then
+              ext_args+=( -name "*.${ext}" )
+              first=0
+            else
+              ext_args+=( -o -name "*.${ext}" )
+            fi
+          done
+        fi
+
+        if [ "${#ext_args[@]}" -gt 0 ]; then
+          _scan_find -type f \( "${ext_args[@]}" \)
+        else
+          _scan_find -type f
+        fi | xargs -r grep -IlE "$rule_pattern" 2>/dev/null | while IFS= read -r file; do
+          insert_finding "$rule_name" "$rule_risk" "$file"
+        done
+        ;;
+
+      chmod)
+        _scan_find -type f -perm "$rule_pattern" | while IFS= read -r file; do
+          insert_finding "$rule_name" "$rule_risk" "$file"
+        done
+        ;;
+
+      filesize)
+        _scan_find -type f -size "$rule_pattern" | while IFS= read -r file; do
+          insert_finding "$rule_name" "$rule_risk" "$file"
+        done
+        ;;
+
+      sha256)
+        log "SHA256 pravilo '$rule_name' — nije podržano u ovoj verziji enginea."
+        ;;
+
+      *)
+        log "Nepoznati tip pravila '$rule_type' za '$rule_name' — preskačem."
+        ;;
+    esac
+
+  done <<< "$rules_raw"
+
+  log "Dinamička pravila završena: $count pravila izvršeno."
+}
+
+run_dynamic_rules
+
+# ── Zaključivanje scana ───────────────────────────────────────────────────────
 COUNT=$(mysql_run "SELECT COUNT(*) FROM findings WHERE scan_id=$SCAN_ID;")
 
 mysql_run "

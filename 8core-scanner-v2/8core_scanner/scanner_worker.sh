@@ -47,7 +47,8 @@ mysql_run() {
 }
 
 sql_escape() {
-  printf "%s" "$1" | sed "s/'/''/g"
+  # Stripa null bajtove i escapeuje single-quote za SQL string literal
+  printf "%s" "$1" | tr -d '\000' | sed "s/'/''/g"
 }
 
 safe_home_path() {

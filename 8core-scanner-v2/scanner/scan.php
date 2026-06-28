@@ -68,6 +68,7 @@ try {
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['request_scan'] ?? '') === '1') {
+    csrf_verify();
     $targetType  = $_POST['target_type']  ?? 'account';
     $targetValue = trim($_POST['target_value'] ?? '');
 
@@ -239,6 +240,7 @@ function scan_status_class($s) {
 
       <form method="post">
         <input type="hidden" name="request_scan" value="1">
+        <?= csrf_field() ?>
 
         <?php if (is_admin()): ?>
           <div class="scan-target-row">
