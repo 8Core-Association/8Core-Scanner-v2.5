@@ -1,0 +1,24 @@
+# 8Core Scanner v2.0 — Root DB konfiguracija (SAMPLE)
+# (c) 2026 Tomislav Galić / 8Core
+# Web: https://8core.hr
+#
+# OVO JE PREDLOŽAK (SAMPLE). Pravi scanner-db.conf generira installer.
+# Kopirajte ovaj fajl u scanner-db.conf i unesite prave vrijednosti,
+# ILI koristite installer koji to radi automatski.
+#
+# Lokacija: /root/8core_scanner/scanner-db.conf
+# Dozvole:  chmod 600 /root/8core_scanner/scanner-db.conf
+# Vlasnik:  root
+
+# ── Baza podataka ──────────────────────────────────────────────────────────
+DB_HOST="localhost"
+DB_NAME="ime_baze"
+DB_USER="korisnik_baze"
+DB_PASS="lozinka_baze"
+DB_CHARSET="utf8mb4"
+
+# ── Putanje enginea ────────────────────────────────────────────────────────
+# Ove vrijednosti moraju odgovarati vrijednostima u web config.php
+ROOT_ENGINE_PATH="/root/8core_scanner"
+QUARANTINE_BASE_PATH="/home/8core_quarantine"
+LOG_PATH="/root/8core_scanner/logs"
