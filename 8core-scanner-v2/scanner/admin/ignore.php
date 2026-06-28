@@ -36,8 +36,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     exit;
 }
 
-$formAction   = $_POST['form_action'] ?? '';
-$importResult = null;
+$formAction = $_POST['form_action'] ?? '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_verify();
@@ -146,25 +145,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 fclose($handle);
 
-                $importResult = ['added' => $added, 'skipped' => $skipped, 'errors' => $errors];
+                $_SESSION['ignore_import_flash'] = ['added' => $added, 'skipped' => $skipped, 'errors' => $errors];
+                header('Location: ignore.php');
+                exit;
             }
         }
 
-        // Don't redirect on import — show results on same page
         if (!$message) {
-            // fall through to render
-            goto render;
+            $redirect = isset($_POST['category']) ? '?tab=' . urlencode($_POST['category']) : 'ignore.php';
+            header('Location: ' . $redirect);
+            exit;
         }
-    }
-
-    if (!$message) {
-        $redirect = isset($_POST['category']) ? '?tab=' . urlencode($_POST['category']) : 'ignore.php';
-        header('Location: ' . $redirect);
-        exit;
     }
 }
 
-render:
+// Pokupi flash rezultat importa (ako postoji)
+$importResult = null;
+if (isset($_SESSION['ignore_import_flash'])) {
+    $importResult = $_SESSION['ignore_import_flash'];
+    unset($_SESSION['ignore_import_flash']);
+}
+
 $activeTab = $_GET['tab'] ?? 'file';
 if (!array_key_exists($activeTab, $CATEGORIES)) $activeTab = 'file';
 
