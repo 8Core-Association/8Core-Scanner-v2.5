@@ -24,6 +24,10 @@ return [
     'default_admin_user' => 'admin',
     'default_admin_pass' => 'PromijeniOvuLozinku2026!',
 
+    // ── Web aplikacija ────────────────────────────────────────────────────
+    'web_app_path' => '/var/www/html/scanner',
+    'web_app_url'  => 'https://domena.hr/scanner',
+
     // ── Putanje root enginea (van web roota) ──────────────────────────────
     // Vrijednosti generira installer prema unosu administratora.
     'root_engine_path' => '/root/8core_scanner',

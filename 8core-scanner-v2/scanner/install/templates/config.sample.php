@@ -17,6 +17,9 @@ return [
     'default_admin_user' => 'admin',
     'default_admin_pass' => 'PromijeniOvuLozinku2026!',
 
+    'web_app_path' => '/var/www/html/scanner',
+    'web_app_url'  => 'https://domena.hr/scanner',
+
     'root_engine_path' => '/root/8core_scanner',
     'scan_script'      => '/root/8core_scanner/ioc_scan.sh',
     'scan_log'         => '/root/8core_scanner/logs/ioc-scan-live.log',

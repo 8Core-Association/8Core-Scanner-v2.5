@@ -109,7 +109,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 2) {
         $configContent = generateConfigPhp(
             $dbHost, $dbName, $dbUser, $dbPass, $dbCharset,
             $adminUser, $adminPass,
-            $rootEngPath, $logPath, $quarPath
+            $rootEngPath, $logPath, $quarPath,
+            $webAppPath, $webAppUrl
         );
         $configPath = __DIR__ . '/../includes/config.php';
         if (file_put_contents($configPath, $configContent) === false) {
@@ -152,7 +153,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 2) {
 // ─────────────────────────────────────────────────────────────────────────────
 function generateConfigPhp($dbHost, $dbName, $dbUser, $dbPass, $dbCharset,
                             $adminUser, $adminPass,
-                            $rootEngPath, $logPath, $quarPath) {
+                            $rootEngPath, $logPath, $quarPath,
+                            $webAppPath = '', $webAppUrl = '') {
     return "<?php\n"
          . "/**\n"
          . " * 8Core Scanner v2.0 — Konfiguracija\n"
@@ -168,6 +170,9 @@ function generateConfigPhp($dbHost, $dbName, $dbUser, $dbPass, $dbCharset,
          . "\n"
          . "    'default_admin_user' => '" . addslashes($adminUser) . "',\n"
          . "    'default_admin_pass' => '" . addslashes($adminPass) . "',\n"
+         . "\n"
+         . "    'web_app_path' => '" . addslashes(rtrim($webAppPath, '/')) . "',\n"
+         . "    'web_app_url'  => '" . addslashes(rtrim($webAppUrl,  '/')) . "',\n"
          . "\n"
          . "    'root_engine_path' => '" . addslashes($rootEngPath) . "',\n"
          . "    'scan_script'      => '" . addslashes($rootEngPath) . "/ioc_scan.sh',\n"
