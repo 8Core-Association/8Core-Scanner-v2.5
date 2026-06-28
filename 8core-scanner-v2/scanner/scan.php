@@ -50,21 +50,43 @@ try {
 
 $accounts = [];
 
-try {
-    if (is_admin()) {
-        $accounts = $pdo->query("
+// Direktoriji u /home koji se uvijek isključuju
+$homeExclude = ['8core_quarantine', 'lost+found'];
+
+if (is_admin()) {
+    // Primarni izvor: stvarni direktoriji u /home
+    if (is_dir('/home') && is_readable('/home')) {
+        foreach (scandir('/home') as $entry) {
+            if ($entry === '.' || $entry === '..') continue;
+            if ($entry[0] === '.') continue;
+            if (in_array($entry, $homeExclude, true)) continue;
+            if (is_dir('/home/' . $entry)) {
+                $accounts[] = $entry;
+            }
+        }
+        sort($accounts);
+    }
+
+    // Fallback / dopuna: accounti iz findings koji nisu u /home
+    try {
+        $fromDb = $pdo->query("
             SELECT DISTINCT account_name
             FROM findings
             WHERE account_name IS NOT NULL AND account_name != ''
             ORDER BY account_name
         ")->fetchAll(PDO::FETCH_COLUMN);
-    } else {
-        if (!empty($user['account_name'])) {
-            $accounts = [$user['account_name']];
+        foreach ($fromDb as $acc) {
+            if (!in_array($acc, $accounts, true)) {
+                $accounts[] = $acc;
+            }
         }
+    } catch (Throwable $e) {}
+
+    sort($accounts);
+} else {
+    if (!empty($user['account_name'])) {
+        $accounts = [$user['account_name']];
     }
-} catch (Throwable $e) {
-    $accounts = [];
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['request_scan'] ?? '') === '1') {
