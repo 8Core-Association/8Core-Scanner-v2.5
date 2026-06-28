@@ -48,6 +48,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
 /* ── POST handleri ── */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_verify();
+
     if ($formAction === 'create' || $formAction === 'update') {
         $name       = trim($_POST['name']        ?? '');
         $desc       = trim($_POST['description'] ?? '');
@@ -146,6 +147,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
+    /* ── BULK ── */
+    if ($formAction === 'bulk') {
+        $bulkAction = $_POST['bulk_action'] ?? '';
+        $ids = array_values(array_filter(array_map('intval', (array)($_POST['ids'] ?? []))));
+
+        if (empty($ids)) {
+            $message     = 'Nema odabranih pravila.';
+            $messageType = 'error';
+        } elseif (!in_array($bulkAction, ['delete', 'activate', 'deactivate'], true)) {
+            $message     = 'Neispravna bulk akcija.';
+            $messageType = 'error';
+        } else {
+            $ph = implode(',', array_fill(0, count($ids), '?'));
+            if ($bulkAction === 'delete') {
+                $pdo->prepare("DELETE FROM scanner_rules WHERE id IN ($ph)")->execute($ids);
+                $message = 'Obrisano ' . count($ids) . ' pravila.';
+            } elseif ($bulkAction === 'activate') {
+                $pdo->prepare("UPDATE scanner_rules SET active=1, updated_at=NOW() WHERE id IN ($ph)")->execute($ids);
+                $message = 'Aktivirano ' . count($ids) . ' pravila.';
+            } elseif ($bulkAction === 'deactivate') {
+                $pdo->prepare("UPDATE scanner_rules SET active=0, updated_at=NOW() WHERE id IN ($ph)")->execute($ids);
+                $message = 'Deaktivirano ' . count($ids) . ' pravila.';
+            }
+        }
+    }
+
     if (!$message) {
         header('Location: rules.php');
         exit;
@@ -195,6 +222,43 @@ $activeRules = (int)$pdo->query("SELECT COUNT(*) FROM scanner_rules WHERE active
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>8Core Scanner – Pravila</title>
 <link rel="stylesheet" href="../assets/css/scanner.css">
+<style>
+.bulk-bar {
+  display: none;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 10px;
+  font-size: 13px;
+}
+.bulk-bar-count {
+  font-weight: 600;
+  color: #1d4ed8;
+  margin-right: 4px;
+}
+.bulk-bar-sep {
+  width: 1px;
+  height: 20px;
+  background: #bfdbfe;
+  margin: 0 2px;
+}
+th.col-check, td.col-check {
+  width: 36px;
+  text-align: center;
+  padding-left: 10px !important;
+}
+input.row-check, #check-all {
+  cursor: pointer;
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent, #2563eb);
+}
+tr.row-selected td { background: #f0f7ff !important; }
+</style>
 </head>
 <body>
 <div class="layout">
@@ -330,11 +394,37 @@ $activeRules = (int)$pdo->query("SELECT COUNT(*) FROM scanner_rules WHERE active
       </form>
     </div>
 
+    <!-- BULK forma (skrivena, popunjava JS) -->
+    <form id="bulk-form" method="post">
+      <input type="hidden" name="form_action"  value="bulk">
+      <input type="hidden" name="bulk_action"  id="bulk-action-input" value="">
+      <?= csrf_field() ?>
+      <div id="bulk-ids"></div>
+    </form>
+
+    <!-- BULK TRAKA -->
+    <div id="bulk-bar" class="bulk-bar">
+      <span class="bulk-bar-count" id="bulk-count">0 odabrano</span>
+      <div class="bulk-bar-sep"></div>
+      <button type="button" class="btn btn-primary btn-sm"
+              onclick="bulkSubmit('activate')">Aktiviraj</button>
+      <button type="button" class="btn btn-ghost btn-sm"
+              onclick="bulkSubmit('deactivate')">Deaktiviraj</button>
+      <button type="button" class="btn btn-danger btn-sm"
+              onclick="bulkSubmit('delete')">Obriši</button>
+      <div class="bulk-bar-sep"></div>
+      <button type="button" class="btn btn-ghost btn-sm"
+              onclick="clearBulkSelection()">Odustani</button>
+    </div>
+
     <!-- TABLICA PRAVILA -->
     <div class="table-wrap">
-      <table>
+      <table id="rules-table">
         <thead>
           <tr>
+            <th class="col-check">
+              <input type="checkbox" id="check-all" title="Odaberi sve">
+            </th>
             <th class="col-active">Aktivno</th>
             <th>Naziv</th>
             <th>Tip</th>
@@ -347,10 +437,13 @@ $activeRules = (int)$pdo->query("SELECT COUNT(*) FROM scanner_rules WHERE active
         </thead>
         <tbody>
         <?php if (empty($rules)): ?>
-          <tr><td colspan="8" class="rules-empty">Nema pravila. Dodajte novo ili uvezite CSV.</td></tr>
+          <tr><td colspan="9" class="rules-empty">Nema pravila. Dodajte novo ili uvezite CSV.</td></tr>
         <?php endif; ?>
         <?php foreach ($rules as $rule): ?>
-          <tr class="<?= $rule['active'] ? '' : 'rule-inactive-row' ?>">
+          <tr class="<?= $rule['active'] ? '' : 'rule-inactive-row' ?>" data-id="<?= (int)$rule['id'] ?>">
+            <td class="col-check">
+              <input type="checkbox" class="row-check" data-id="<?= (int)$rule['id'] ?>">
+            </td>
             <td>
               <form method="post" class="inline-form">
                 <input type="hidden" name="form_action" value="toggle">
