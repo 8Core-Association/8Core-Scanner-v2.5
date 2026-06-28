@@ -112,11 +112,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 2) {
             $rootEngPath, $logPath, $quarPath,
             $webAppPath, $webAppUrl
         );
-        $configPath = __DIR__ . '/../includes/config.php';
+        $configPath = rtrim($webAppPath, '/') . '/includes/config.php';
         if (file_put_contents($configPath, $configContent) === false) {
-            $errors[] = 'Ne mogu zapisati includes/config.php. Provjeri dozvole direktorija.';
+            $errors[] = 'Ne mogu zapisati ' . $configPath . '. Provjeri dozvole direktorija.';
         } else {
-            $success[] = 'Konfiguracija zapisana: includes/config.php';
+            $success[] = 'Konfiguracija zapisana: ' . $configPath;
         }
     }
 
@@ -392,7 +392,7 @@ a { color:#60a5fa; }
         <div class="success-box"><ul class="msgs"><?php foreach ($success as $s): ?><li><?= htmlspecialchars($s, ENT_QUOTES, 'UTF-8') ?></li><?php endforeach; ?></ul></div>
       <?php endif; ?>
       <p style="color:#94a3b8;font-size:13px;margin:0 0 16px;">Installer je zaključan (install.lock kreiran).</p>
-      <a href="../login.php" class="btn btn-primary">Idi na prijavu</a>
+      <a href="<?= htmlspecialchars(rtrim($webAppUrl, '/'), ENT_QUOTES, 'UTF-8') ?>/login.php" class="btn btn-primary">Idi na prijavu</a>
     </div>
 
     <div class="card">
@@ -449,10 +449,10 @@ bash /root/install_8core_scanner.sh</div>
         njezino brisanje ili preimenovanje nakon provjere rada sustava:
       </p>
       <div class="cmd-block"># Brisanje install/ mape (preporučeno):
-rm -rf <?= htmlspecialchars(rtrim($detectedWebPath, '/'), ENT_QUOTES, 'UTF-8') ?>/install/
+rm -rf <?= htmlspecialchars(rtrim($webAppPath, '/'), ENT_QUOTES, 'UTF-8') ?>/install/
 
 # Ili preimenovanje:
-mv <?= htmlspecialchars(rtrim($detectedWebPath, '/'), ENT_QUOTES, 'UTF-8') ?>/install/ <?= htmlspecialchars(rtrim($detectedWebPath, '/'), ENT_QUOTES, 'UTF-8') ?>/install_disabled/</div>
+mv <?= htmlspecialchars(rtrim($webAppPath, '/'), ENT_QUOTES, 'UTF-8') ?>/install/ <?= htmlspecialchars(rtrim($webAppPath, '/'), ENT_QUOTES, 'UTF-8') ?>/install_disabled/</div>
       <p style="color:#475569;font-size:12px;margin:8px 0 0;">
         Za buduće nadogradnje sheme baze koristi: <a href="migrate.php">install/migrate.php</a> (zahtijeva admin prijavu).
       </p>
