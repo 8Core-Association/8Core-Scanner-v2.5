@@ -112,11 +112,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 2) {
             $rootEngPath, $logPath, $quarPath,
             $webAppPath, $webAppUrl
         );
-        $configPath = rtrim($webAppPath, '/') . '/includes/config.php';
+        $configPath = __DIR__ . '/../includes/config.php';
         if (file_put_contents($configPath, $configContent) === false) {
-            $errors[] = 'Ne mogu zapisati ' . $configPath . '. Provjeri dozvole direktorija.';
+            $errors[] = 'Ne mogu zapisati includes/config.php. Provjeri dozvole direktorija.';
         } else {
-            $success[] = 'Konfiguracija zapisana: ' . $configPath;
+            $success[] = 'Konfiguracija zapisana: includes/config.php';
         }
     }
 
