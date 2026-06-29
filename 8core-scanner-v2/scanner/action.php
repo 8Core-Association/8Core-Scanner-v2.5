@@ -21,7 +21,7 @@ csrf_verify();
 $action = isset($_POST['action']) ? $_POST['action'] : '';
 $note   = isset($_POST['note'])   ? trim($_POST['note']) : '';
 
-$allowed = ['ignore', 'checked', 'quarantine_requested', 'delete_requested', 'new'];
+$allowed = ['ignore', 'checked', 'quarantine_requested', 'delete_requested', 'restore_requested', 'new'];
 
 if (!in_array($action, $allowed, true)) {
     http_response_code(400);

@@ -503,7 +503,11 @@ tr.row-expanded .expand-toggle svg { stroke: #fff; transform: rotate(45deg); }
 .status-ignore     { background: #f1f5f9; color: #94a3b8; border: 1px solid #e2e8f0; }
 .status-checked    { background: #eff6ff; color: var(--accent); border: 1px solid #bfdbfe; }
 .status-quarantine { background: #fffbeb; color: #b45309; border: 1px solid #fde68a; }
+.status-quarantined{ background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
 .status-delete     { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+.status-restore    { background: #ecfdf5; color: #065f46; border: 1px solid #6ee7b7; }
+.status-restored   { background: #d1fae5; color: #064e3b; border: 1px solid #34d399; }
+.status-failed     { background: #fff1f2; color: #9f1239; border: 1px solid #fda4af; }
 
 /* ── ACTION DROPDOWN ─────────────────────────── */
 .action-drop {
@@ -593,9 +597,11 @@ tr.row-expanded .expand-toggle svg { stroke: #fff; transform: rotate(45deg); }
 .action-menu-item.act-ignore     .dot { background: #94a3b8; }
 .action-menu-item.act-quarantine .dot { background: var(--medium); }
 .action-menu-item.act-delete     .dot { background: var(--high); }
+.action-menu-item.act-restore    .dot { background: #10b981; }
 
 .action-menu-item.act-delete     { color: var(--high); }
 .action-menu-item.act-quarantine { color: #92400e; }
+.action-menu-item.act-restore    { color: #065f46; }
 
 /* ── NOTICES ─────────────────────────────────── */
 .notice {

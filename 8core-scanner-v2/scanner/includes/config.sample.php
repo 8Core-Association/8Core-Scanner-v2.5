@@ -24,6 +24,9 @@ return [
     'default_admin_user' => 'admin',
     'default_admin_pass' => 'PromijeniOvuLozinku2026!',
 
+    // Globalni prekidač za CSRF zaštitu (true = uključeno, false = isključeno)
+    'csrf_enabled' => true,
+
     // ── Web aplikacija ────────────────────────────────────────────────────
     'web_app_path' => '/var/www/html/scanner',
     'web_app_url'  => 'https://domena.hr/scanner',

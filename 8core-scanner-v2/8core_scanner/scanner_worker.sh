@@ -64,22 +64,105 @@ prepare_runtime() {
 }
 
 process_file_actions() {
-  local rows id status file account qdir qpath basefile ts final_status
+  local rows id status file account qdir qpath basefile ts final_status qpath_stored
 
   rows=$(mysql_run "
-    SELECT id, action_status, file_path, IFNULL(account_name,'unknown')
+    SELECT id, action_status, file_path, IFNULL(account_name,'unknown'), IFNULL(quarantine_path,'')
     FROM findings
-    WHERE action_status IN ('delete_requested','quarantine_requested')
+    WHERE action_status IN ('delete_requested','quarantine_requested','restore_requested')
     ORDER BY id ASC
     LIMIT 20;
   ")
 
   [ -z "$rows" ] && return 0
 
-  while IFS=$'\t' read -r id status file account; do
+  while IFS=$'\t' read -r id status file account qpath_stored; do
     [ -z "$id" ] && continue
 
     log "Action zahtjev ID=$id STATUS=$status FILE=$file"
+
+    # ── RESTORE ──────────────────────────────────────────────────────────────
+    if [ "$status" = "restore_requested" ]; then
+      if [ -z "$qpath_stored" ]; then
+        mysql_run "
+          UPDATE findings
+          SET action_status='restore_failed',
+              action_error='quarantine_path je prazan',
+              action_at=NOW()
+          WHERE id=$id;
+        "
+        log "Restore neuspješan ID=$id razlog: quarantine_path prazan"
+        continue
+      fi
+
+      if [ ! -f "$qpath_stored" ]; then
+        mysql_run "
+          UPDATE findings
+          SET action_status='restore_failed',
+              action_error='Fajl u karanteni nije pronađen',
+              action_at=NOW()
+          WHERE id=$id;
+        "
+        log "Restore neuspješan ID=$id razlog: qpath ne postoji ($qpath_stored)"
+        continue
+      fi
+
+      if ! safe_home_path "$file"; then
+        mysql_run "
+          UPDATE findings
+          SET action_status='restore_failed',
+              action_error='Nesigurna odredišna putanja',
+              action_at=NOW()
+          WHERE id=$id;
+        "
+        log "Restore neuspješan ID=$id razlog: odredište nije /home/ ($file)"
+        continue
+      fi
+
+      local dest_dir
+      dest_dir=$(dirname "$file")
+      mkdir -p "$dest_dir"
+
+      if [ -e "$file" ]; then
+        mysql_run "
+          UPDATE findings
+          SET action_status='restore_failed',
+              action_error='Odredišni fajl već postoji — overwrite blokiran',
+              action_at=NOW()
+          WHERE id=$id;
+        "
+        log "Restore neuspješan ID=$id razlog: conflict — fajl već postoji ($file)"
+        continue
+      fi
+
+      if mv -- "$qpath_stored" "$file"; then
+        # chown samo ako korisnik postoji
+        if id -u "$account" &>/dev/null 2>&1; then
+          chown "${account}:${account}" "$file" 2>/dev/null || true
+        fi
+        chmod 640 "$file"
+        mysql_run "
+          UPDATE findings
+          SET action_status='restored',
+              action_error=NULL,
+              action_at=NOW()
+          WHERE id=$id;
+        "
+        log "Restored ID=$id FROM=$(sql_escape "$qpath_stored") TO=$(sql_escape "$file")"
+      else
+        mysql_run "
+          UPDATE findings
+          SET action_status='restore_failed',
+              action_error='mv neuspješan',
+              action_at=NOW()
+          WHERE id=$id;
+        "
+        log "Restore neuspješan ID=$id FILE=$file (mv greška)"
+      fi
+      continue
+    fi
+
+    # ── DELETE / QUARANTINE ───────────────────────────────────────────────────
 
     if ! safe_home_path "$file"; then
       final_status="${status%_requested}_failed"

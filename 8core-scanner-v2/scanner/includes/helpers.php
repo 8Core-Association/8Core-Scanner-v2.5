@@ -18,8 +18,12 @@ function risk_class($risk) {
 function action_class($status) {
     if ($status === 'ignore')               return 'status-ignore';
     if ($status === 'quarantine_requested') return 'status-quarantine';
+    if ($status === 'quarantined')          return 'status-quarantined';
     if ($status === 'delete_requested')     return 'status-delete';
     if ($status === 'checked')              return 'status-checked';
+    if ($status === 'restore_requested')    return 'status-restore';
+    if ($status === 'restored')             return 'status-restored';
+    if ($status === 'restore_failed')       return 'status-failed';
     return 'status-new';
 }
 
@@ -40,20 +44,45 @@ function flash_message() {
 
 // ── CSRF zaštita ─────────────────────────────────────────────────────────────
 
+function csrf_enabled(): bool {
+    global $config;
+
+    if (isset($config['csrf_enabled']) && $config['csrf_enabled'] === false) {
+        return false;
+    }
+
+    return true;
+}
+
 function csrf_token(): string {
+    if (!csrf_enabled()) {
+        return '';
+    }
+
     if (session_status() !== PHP_SESSION_ACTIVE) session_start();
+
     if (empty($_SESSION['csrf_token'])) {
         $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
     }
+
     return $_SESSION['csrf_token'];
 }
 
 function csrf_field(): string {
+    if (!csrf_enabled()) {
+        return '';
+    }
+
     return '<input type="hidden" name="csrf_token" value="' . h(csrf_token()) . '">';
 }
 
 function csrf_verify(): void {
+    if (!csrf_enabled()) {
+        return;
+    }
+
     $submitted = $_POST['csrf_token'] ?? '';
+
     if (!hash_equals(csrf_token(), $submitted)) {
         http_response_code(403);
         echo 'Nevažeći CSRF token. Osvježi stranicu i pokušaj ponovo.';

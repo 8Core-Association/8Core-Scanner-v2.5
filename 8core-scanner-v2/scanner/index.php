@@ -92,6 +92,7 @@ try {
             " . ($hasExt ? "file_ext" : "'' AS file_ext") . ",
             file_path,
             $relCol AS relative_path,
+            " . (has_column($pdo, 'findings', 'quarantine_path') ? "quarantine_path" : "'' AS quarantine_path") . ",
             mtime,
             " . ($hasCtime ? "ctime"       : "NULL AS ctime") . ",
             " . ($hasBirth ? "birth_time"  : "NULL AS birth_time") . ",
@@ -255,7 +256,12 @@ try {
 
       <select name="status">
         <option value="">Svi statusi</option>
-        <?php foreach (['new','checked','ignore','quarantine_requested','delete_requested'] as $s): ?>
+        <?php foreach ([
+            'new', 'checked', 'ignore',
+            'quarantine_requested', 'quarantined',
+            'delete_requested',
+            'restore_requested', 'restored', 'restore_failed',
+        ] as $s): ?>
           <option value="<?= h($s) ?>" <?= $status === $s ? 'selected' : '' ?>><?= h($s) ?></option>
         <?php endforeach; ?>
       </select>
@@ -344,6 +350,7 @@ try {
                     'delete_requested'     => ['Delete',     'act-delete'],
                   ] as $act => $meta): ?>
                   <form method="post" action="action.php">
+                    <?= csrf_field() ?>
                     <input type="hidden" name="id"     value="<?= (int)$f['id'] ?>">
                     <input type="hidden" name="action" value="<?= h($act) ?>">
                     <button type="submit" class="action-menu-item <?= h($meta[1]) ?>">
@@ -351,6 +358,16 @@ try {
                     </button>
                   </form>
                   <?php endforeach; ?>
+                  <?php if (($f['action_status'] ?? '') === 'quarantined' && !empty($f['quarantine_path'])): ?>
+                  <form method="post" action="action.php">
+                    <?= csrf_field() ?>
+                    <input type="hidden" name="id"     value="<?= (int)$f['id'] ?>">
+                    <input type="hidden" name="action" value="restore_requested">
+                    <button type="submit" class="action-menu-item act-restore">
+                      <span class="dot"></span>Vrati iz karantene
+                    </button>
+                  </form>
+                  <?php endif; ?>
                 </div>
               </div>
             </td>
