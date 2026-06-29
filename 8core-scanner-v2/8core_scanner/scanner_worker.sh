@@ -69,7 +69,7 @@ process_file_actions() {
   rows=$(mysql_run "
     SELECT id, action_status, file_path, IFNULL(account_name,'unknown'), IFNULL(quarantine_path,'')
     FROM findings
-    WHERE action_status IN ('delete_requested','quarantine_requested','restore_requested')
+    WHERE action_status IN ('delete_requested','quarantine_requested','restore_requested','purge_requested')
     ORDER BY id ASC
     LIMIT 20;
   ")
@@ -94,6 +94,21 @@ process_file_actions() {
         log "Restore neuspješan ID=$id razlog: quarantine_path prazan"
         continue
       fi
+
+      case "$qpath_stored" in
+        /home/8core_quarantine/*)  : ;;
+        *)
+          mysql_run "
+            UPDATE findings
+            SET action_status='restore_failed',
+                action_error='quarantine_path nije unutar /home/8core_quarantine/',
+                action_at=NOW()
+            WHERE id=$id;
+          "
+          log "Restore neuspješan ID=$id razlog: qpath izvan dozvoljene baze ($qpath_stored)"
+          continue
+          ;;
+      esac
 
       if [ ! -f "$qpath_stored" ]; then
         mysql_run "
@@ -158,6 +173,68 @@ process_file_actions() {
           WHERE id=$id;
         "
         log "Restore neuspješan ID=$id FILE=$file (mv greška)"
+      fi
+      continue
+    fi
+
+    # ── PURGE ─────────────────────────────────────────────────────────────────
+    if [ "$status" = "purge_requested" ]; then
+      if [ -z "$qpath_stored" ]; then
+        mysql_run "
+          UPDATE findings
+          SET action_status='purge_failed',
+              action_error='quarantine_path je prazan',
+              action_at=NOW()
+          WHERE id=$id;
+        "
+        log "Purge neuspješan ID=$id razlog: quarantine_path prazan"
+        continue
+      fi
+
+      case "$qpath_stored" in
+        /home/8core_quarantine/*)  : ;;
+        *)
+          mysql_run "
+            UPDATE findings
+            SET action_status='purge_failed',
+                action_error='quarantine_path nije unutar /home/8core_quarantine/',
+                action_at=NOW()
+            WHERE id=$id;
+          "
+          log "Purge neuspješan ID=$id razlog: qpath izvan dozvoljene baze ($qpath_stored)"
+          continue
+          ;;
+      esac
+
+      if [ -f "$qpath_stored" ]; then
+        if rm -f -- "$qpath_stored"; then
+          mysql_run "
+            UPDATE findings
+            SET action_status='purged',
+                action_error=NULL,
+                action_at=NOW()
+            WHERE id=$id;
+          "
+          log "Purged ID=$id FILE=$qpath_stored"
+        else
+          mysql_run "
+            UPDATE findings
+            SET action_status='purge_failed',
+                action_error='rm neuspješan',
+                action_at=NOW()
+            WHERE id=$id;
+          "
+          log "Purge neuspješan ID=$id FILE=$qpath_stored (rm greška)"
+        fi
+      else
+        mysql_run "
+          UPDATE findings
+          SET action_status='purged',
+              action_error='Fajl nije pronađen — označeno kao purged',
+              action_at=NOW()
+          WHERE id=$id;
+        "
+        log "Purged (fajl nije bio na disku) ID=$id FILE=$qpath_stored"
       fi
       continue
     fi
