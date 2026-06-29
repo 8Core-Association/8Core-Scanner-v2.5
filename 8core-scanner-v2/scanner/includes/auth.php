@@ -1,6 +1,6 @@
 <?php
 /**
- * 8Core Scanner v2.0 — Autentikacija i ovlasti
+ * 8Core Scanner v2.5.3 — Autentikacija i ovlasti
  * (c) 2026 Tomislav Galić <tomislav@8core.hr>
  * Sva prava pridržana.
  */

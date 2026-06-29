@@ -6,6 +6,67 @@ Verzioniranje slijedi [Semantic Versioning](https://semver.org/lang/hr/).
 
 ---
 
+## [2.5.3] — 2026-06-29
+
+### Added
+
+- **Restore iz karantene** — novi workflow za vraćanje fajlova iz karantene natrag na originalnu lokaciju:
+  - Nova `action_status` vrijednost: `restore_requested`, `restored`, `restore_failed`
+  - UI gumb "Vrati iz karantene" u tablici nalaza (prikazuje se samo kad je `action_status='quarantined'` i `quarantine_path` nije prazan)
+  - PHP web panel samo postavlja `restore_requested` — filesystem operacije isključivo root worker
+  - `scanner_worker.sh`: blok za obradu `restore_requested` (provjera qpath prefiksa, provjera konflikta, `mv` + `chown account:account` + `chmod 640`)
+
+- **Globalni CSRF prekidač** (`'csrf_enabled' => false` u `config.php`):
+  - Nova `csrf_enabled()` funkcija u `helpers.php`
+  - `csrf_token()`, `csrf_field()`, `csrf_verify()` centralno provjeravaju config key
+  - Kada je `false`, sve CSRF funkcije globalno onemogućene bez izmjene pojedinih fajlova
+  - Dodan key `'csrf_enabled' => true` (safe default) u oba `config.sample.php`
+
+- **`scanner/admin/quarantine.php`** — nova admin stranica za pregled i upravljanje karantenom:
+  - Filteri: status (default `quarantined`), account, risk, pravilo, search po path, ID/ID-evi (comma-separated)
+  - Tablica sa svim relevantnim kolonama (originalni path, quarantine path, action_error prikaz)
+  - **Preview sadržaja**: čita `quarantine_path`, provjera prefiksa baze karantene, binary detekcija (null bajt), limit 200 KB, SHA256 hash, `h()` escaping — PHP ne izvršava sadržaj
+  - **Bulk akcije**: checkbox po redu (samo za `quarantined`), check-all, bulk bar (Vrati / Trajno obriši / Ignore hash), confirm dialog za purge, PRG redirect s flash porukom (statistika: sent/skipped/added)
+  - Akcije po nalazu: Vrati (`restore_requested`), Obriši (`purge_requested`), Ignore hash (SHA256 → `scanner_ignore_list`), Sadržaj (preview overlay)
+  - Link "Karantena" dodan u admin sidebar i u glavni sidebar (samo admin)
+  - Link "Otvori u karanteni" u detail panelu nalaza (samo za `quarantined` s `quarantine_path`)
+
+- **Purge iz karantene** (`purge_requested` / `purged`):
+  - Nova `action_status` vrijednost: `purge_requested`, `purged`, `purge_failed`
+  - PHP ne briše fajl — samo postavlja status; brisanje radi root worker
+  - Worker: provjera da `quarantine_path` počinje s `$QUARANTINE_BASE`, `rm -f`, ako fajl ne postoji → označava `purged`
+
+- **`WEB_PANEL_USER` / `WEB_PANEL_GROUP` podrška** u `scanner_worker.sh`:
+  - Nova varijabla `WEB_PANEL_USER` i `WEB_PANEL_GROUP` u `scanner-db.conf`
+  - Nova helper funkcija `set_quarantine_perms()`: ako grupa postoji → `chown root:$WEB_PANEL_GROUP`, `chmod 750` (dir) / `chmod 640` (file)
+  - Zamijenjeno `chmod 700/600` s `set_quarantine_perms()` za bazu karantene, per-account direktorije i karantenizirane fajlove
+  - Bez `WEB_PANEL_GROUP` ponašanje je sigurno-restriktivno (samo chmod, bez chown)
+  - Default u sample confu: `WEB_PANEL_USER='8core5'`
+  - Restore i dalje vraća fajl s `chown account:account + chmod 640` (nije WEB_PANEL_GROUP)
+
+### Changed
+
+- **`scanner_worker.sh`** (v1.3 → v1.4):
+  - Svi hardkodirani `/home/8core_quarantine/` prefiksi zamijenjeni s `"$QUARANTINE_BASE"/` (restore + purge)
+  - `process_file_actions()` prošireno: `restore_requested` i `purge_requested` u SQL query i obradi
+  - Redoslijed: restore → purge → delete → quarantine
+
+- **`scanner/action.php`** — dodani `restore_requested` i `purge_requested` u listu dopuštenih akcija
+
+- **`scanner/index.php`** — dodani novi `action_status` u filter dropdown; `quarantine_path` dodan u SELECT upit; `csrf_field()` u akcijskim formama
+
+- **`helpers.php`** — `action_class()` proširena za `quarantined`, `restore_requested`, `restored`, `restore_failed`, `status-failed`
+
+### Security
+
+- PHP web panel ne izvršava, ne briše niti mv-a fajlove iz karantene — sve filesystem akcije radi root worker
+- Preview i ignore hash: provjera da `quarantine_path` počinje s konfiguriranom bazom karantene (`$config['quarantine_path']`)
+- Restore ne smije pisati izvan `/home/`, ne prepisuje postojeće fajlove
+- Purge: stroga provjera prefiksa `$QUARANTINE_BASE` (ne više hardkodirano) — ne dira originalni `file_path`
+- `WEB_PANEL_GROUP` karantena: web panel može čitati (640/750), ne može pisati/brisati
+
+---
+
 ## [2.0.1] — 2026-06-28
 
 ### Added

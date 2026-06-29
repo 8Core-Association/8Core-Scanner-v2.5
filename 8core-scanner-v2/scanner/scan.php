@@ -1,6 +1,6 @@
 <?php
 /**
- * 8Core Scanner v2.0 — Upravljanje skeniranjima
+ * 8Core Scanner v2.5.3 — Upravljanje skeniranjima
  * (c) 2026 Tomislav Galić <tomislav@8core.hr>
  * Web: https://8core.hr
  * Kontakt: info@8core.hr | Tel: +385 099 851 0717
@@ -215,7 +215,7 @@ function scan_status_class($s) {
       </div>
       <span class="logo-text">8Core Scanner</span>
     </div>
-    <div class="logo-version">IOC Scanner v2.0</div>
+    <div class="logo-version">IOC Scanner v2.5.3</div>
   </div>
 
   <nav class="sidebar-nav">

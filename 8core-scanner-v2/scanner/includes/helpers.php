@@ -1,6 +1,6 @@
 <?php
 /**
- * 8Core Scanner v2.0 — Pomoćne funkcije
+ * 8Core Scanner v2.5.3 — Pomoćne funkcije
  * (c) 2026 Tomislav Galić <tomislav@8core.hr>
  * Sva prava pridržana.
  */

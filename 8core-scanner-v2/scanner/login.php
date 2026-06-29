@@ -1,6 +1,6 @@
 <?php
 /**
- * 8Core Scanner v2.0 — Prijava
+ * 8Core Scanner v2.5.3 — Prijava
  * (c) 2026 Tomislav Galić <tomislav@8core.hr>
  * Web: https://8core.hr
  * Kontakt: info@8core.hr | Tel: +385 099 851 0717
@@ -47,7 +47,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       </div>
       <div class="login-logo-text">
         <div class="name">8Core Scanner</div>
-        <div class="sub">Security Dashboard v2.0</div>
+        <div class="sub">Security Dashboard v2.5.3</div>
       </div>
     </div>
 

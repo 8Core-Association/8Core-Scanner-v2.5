@@ -1,6 +1,6 @@
 <?php
 /**
- * 8Core Scanner v2.0 — Standalone migrate (ažuriranje sheme)
+ * 8Core Scanner v2.5.3 — Standalone migrate (ažuriranje sheme)
  * (c) 2026 Tomislav Galić <tomislav@8core.hr>
  * Web: https://8core.hr
  * Kontakt: info@8core.hr | Tel: +385 099 851 0717
@@ -201,7 +201,7 @@ if (php_sapi_name() === 'cli') {
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
     </div>
     <div>
-      <div style="font-size:15px;font-weight:700;color:var(--text);">8Core Scanner v2.0</div>
+      <div style="font-size:15px;font-weight:700;color:var(--text);">8Core Scanner v2.5.3</div>
       <div style="font-size:12px;color:var(--text-muted);">Migracija baze podataka</div>
     </div>
   </div>

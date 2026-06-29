@@ -1,6 +1,6 @@
 <?php
 /**
- * 8Core Scanner v2.0 — Konekcija na bazu
+ * 8Core Scanner v2.5.3 — Konekcija na bazu
  * (c) 2026 Tomislav Galić <tomislav@8core.hr>
  * Sva prava pridržana.
  */

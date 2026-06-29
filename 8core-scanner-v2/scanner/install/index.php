@@ -1,6 +1,6 @@
 <?php
 /**
- * 8Core Scanner v2.0 — Installer
+ * 8Core Scanner v2.5.3 — Installer
  * (c) 2026 Tomislav Galić <tomislav@8core.hr>
  * Web: https://8core.hr
  * Kontakt: info@8core.hr | Tel: +385 099 851 0717
@@ -12,7 +12,7 @@
  */
 
 define('SCANNER_INSTALL', true);
-define('APP_VERSION', '2.0.1');
+define('APP_VERSION', '2.5.3');
 
 $lockFile = __DIR__ . '/install.lock';
 
@@ -158,7 +158,7 @@ function generateConfigPhp($dbHost, $dbName, $dbUser, $dbPass, $dbCharset,
                             $webAppPath = '', $webAppUrl = '') {
     return "<?php\n"
          . "/**\n"
-         . " * 8Core Scanner v2.0 — Konfiguracija\n"
+         . " * 8Core Scanner v2.5.3 — Konfiguracija\n"
          . " * Generirano installerom: " . date('Y-m-d H:i:s') . "\n"
          . " * NE COMMITATI ovu datoteku u repozitorij!\n"
          . " */\n"
@@ -221,7 +221,7 @@ function generateRootInstallScript(
 
     $nl = "\n";
     $s  = '#!/bin/bash' . $nl
-        . '# 8Core Scanner v2.0 — Root engine instalacija' . $nl
+        . '# 8Core Scanner v2.5.3 — Root engine instalacija' . $nl
         . '# Generirano: ' . date('Y-m-d H:i:s') . $nl
         . '# POKRENUTI KAO ROOT: bash /root/install_8core_scanner.sh' . $nl
         . $nl
@@ -253,7 +253,7 @@ function generateRootInstallScript(
         . '# ─── Kreiranje scanner-db.conf ───────────────────────────────────' . $nl
         . 'echo "Kreiranje scanner-db.conf..."' . $nl
         . "cat > \"\$ROOT_ENGINE_PATH/scanner-db.conf\" << '_8CORE_CONF_END_'" . $nl
-        . '# 8Core Scanner v2.0 — Root DB konfiguracija' . $nl
+        . '# 8Core Scanner v2.5.3 — Root DB konfiguracija' . $nl
         . '# Generirano: ' . date('Y-m-d H:i:s') . $nl
         . '# chmod 600 scanner-db.conf' . $nl
         . $nl
@@ -302,7 +302,7 @@ function generateRootInstallScript(
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>8Core Scanner v2.0 – Installer</title>
+<title>8Core Scanner v2.5.3 – Installer</title>
 <style>
 *, *::before, *::after { box-sizing: border-box; }
 body { margin:0; font-family:'Segoe UI',Arial,sans-serif; font-size:14px; background:#0f172a; color:#e2e8f0; min-height:100vh; display:flex; align-items:flex-start; justify-content:center; padding:30px 16px; }

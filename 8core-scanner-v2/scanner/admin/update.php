@@ -1,6 +1,6 @@
 <?php
 /**
- * 8Core Scanner v2.0 — Admin: Update
+ * 8Core Scanner v2.5.3 — Admin: Update
  * (c) 2026 Tomislav Galić <tomislav@8core.hr>
  * Sva prava pridržana.
  *
@@ -20,7 +20,7 @@ $versionFile = __DIR__ . '/../VERSION';
 $lockFile    = __DIR__ . '/../install/install.lock';
 $webRoot     = realpath(__DIR__ . '/..');
 
-$packageVersion   = file_exists($versionFile) ? trim(file_get_contents($versionFile)) : '2.0.x';
+$packageVersion   = file_exists($versionFile) ? trim(file_get_contents($versionFile)) : '2.5.3';
 $installedVersion = '—';
 try {
     $row = $pdo->query("SELECT setting_value FROM scanner_settings WHERE setting_key='installed_version'")->fetch();
@@ -61,7 +61,7 @@ function generate_root_update_script(array $cfg, string $packageVersion): string
 
     $nl = "\n";
     return '#!/bin/bash' . $nl
-         . '# 8Core Scanner v2.0 — Root engine UPDATE skripta' . $nl
+         . '# 8Core Scanner v2.5.3 — Root engine UPDATE skripta' . $nl
          . '# Paket verzija: ' . $packageVersion . $nl
          . '# Generirano: ' . date('Y-m-d H:i:s') . $nl
          . '# POKRENUTI KAO ROOT: bash /root/update_8core_scanner.sh' . $nl

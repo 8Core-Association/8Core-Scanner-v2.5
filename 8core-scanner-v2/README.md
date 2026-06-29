@@ -1,4 +1,4 @@
-# 8Core Scanner v2.0
+# 8Core Scanner v2.5.3
 
 **Vlasnički softver — Sva prava pridržana**
 (c) 2026 Tomislav Galić / 8Core

@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==========================================================
-# 8Core Scanner Worker v1.3
+# 8Core Scanner Worker v1.4
 # Copyright (c) 2026 8Core
 # Author: Tomislav Galić / 8Core
 # Web: https://8core.hr

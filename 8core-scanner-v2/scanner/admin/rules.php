@@ -1,6 +1,6 @@
 <?php
 /**
- * 8Core Scanner v2.0 — Admin: Pravila i definicije
+ * 8Core Scanner v2.5.3 — Admin: Pravila i definicije
  * (c) 2026 Tomislav Galić <tomislav@8core.hr>
  * Web: https://8core.hr
  * Kontakt: info@8core.hr | Tel: +385 099 851 0717
