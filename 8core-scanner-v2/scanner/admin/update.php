@@ -9,7 +9,7 @@
  *   2. Dry-run prikaz fajlova
  *   3. Apply web update (preskoči config.php i install.lock)
  *   4. Apply DB migracije
- *   5. Prikaz root engine update skripte
+ *   5. Konfiguracija + prikaz root engine update skripte
  */
 require __DIR__ . '/../includes/auth.php';
 require __DIR__ . '/../includes/helpers.php';
@@ -32,7 +32,6 @@ $SKIP_FILES = [
     'includes/config.php',
     'install/install.lock',
 ];
-$PROTECTED_PREFIXES = ['install/install.lock'];
 
 // ── Helpers ────────────────────────────────────────────────
 function is_safe_zip_path(string $path): bool {
@@ -53,119 +52,210 @@ function sh_quote_update(string $value): string {
     return "'" . str_replace("'", "'\"'\"'", $value) . "'";
 }
 
-function generate_root_update_script(array $cfg, string $packageVersion, string $webRoot): string {
+// ── Auto-detekcija web panel usera iz web_app_path ─────────
+function detect_web_panel_user(string $webAppPath): array {
+    $path = rtrim($webAppPath, '/');
+    // Pokušaj stat na direktorij web app-a, pa parent
+    foreach ([$path, dirname($path)] as $check) {
+        if (is_dir($check)) {
+            $stat = @stat($check);
+            if ($stat !== false) {
+                $uid = $stat[4];
+                $gid = $stat[5];
+                $uinfo = @posix_getpwuid($uid);
+                $ginfo = @posix_getgrgid($gid);
+                $uname = ($uinfo && !empty($uinfo['name'])) ? $uinfo['name'] : (string)$uid;
+                $gname = ($ginfo && !empty($ginfo['name'])) ? $ginfo['name'] : (string)$gid;
+                // Ne predlažemo root
+                if ($uname !== 'root' && $uid !== 0) {
+                    return ['user' => $uname, 'group' => $gname];
+                }
+            }
+        }
+    }
+    return ['user' => '8core5', 'group' => '8core5'];
+}
+
+// ── Generiranje root update skripte ───────────────────────
+function generate_root_update_script(
+    array  $cfg,
+    string $packageVersion,
+    string $webRoot,
+    string $wpUser        = '8core5',
+    string $wpGroup       = '8core5',
+    bool   $overwriteWp   = false,
+    bool   $fixQuarPerms  = false
+): string {
     $rootPath   = sh_quote_update($cfg['root_engine_path'] ?? '/root/8core_scanner');
     $logPath    = sh_quote_update(dirname($cfg['scan_log']  ?? '/root/8core_scanner/logs/x'));
-    $quarPath   = sh_quote_update($cfg['quarantine_path']   ?? '/home/8core_quarantine');
+    $quarPath   = sh_quote_update($cfg['quarantine_path']  ?? '/home/8core_quarantine');
     $ts         = date('YmdHis');
 
-    // Derive ENGINE_SOURCE from web_app_path: sibling 8core_scanner/ next to scanner/
+    // ENGINE_SOURCE: sibling 8core_scanner/ uz web root
     $webAppPath = rtrim($cfg['web_app_path'] ?? $webRoot, '/');
     $engineSrc  = dirname($webAppPath) . '/8core_scanner';
     $engineSrcQ = sh_quote_update($engineSrc);
 
+    // WEB_PANEL_USER/GROUP za skriptu — prazne vrijednosti ne unosimo
+    $wpUser  = trim($wpUser)  ?: '8core5';
+    $wpGroup = trim($wpGroup) ?: $wpUser;
+    $wpUserQ  = sh_quote_update($wpUser);
+    $wpGroupQ = sh_quote_update($wpGroup);
+
     $nl = "\n";
-    return '#!/bin/bash' . $nl
-         . '# 8Core Scanner v2.5.3 — Root engine UPDATE skripta' . $nl
-         . '# Paket verzija: ' . $packageVersion . $nl
-         . '# Generirano: ' . date('Y-m-d H:i:s') . $nl
-         . '# POKRENUTI KAO ROOT: bash /root/update_8core_scanner.sh' . $nl
-         . $nl
-         . 'set -e' . $nl
-         . $nl
-         . 'ROOT_ENGINE_PATH=' . $rootPath . $nl
-         . 'LOG_PATH=' . $logPath . $nl
-         . 'QUARANTINE_BASE_PATH=' . $quarPath . $nl
-         . 'BACKUP_PATH="${ROOT_ENGINE_PATH}_backup_' . $ts . '"' . $nl
-         . $nl
-         . '# ENGINE_SOURCE: putanja do ažurirane 8core_scanner/ mape (web update je već primijenjen)' . $nl
-         . 'ENGINE_SOURCE=' . $engineSrcQ . $nl
-         . $nl
-         . '# ─── Provjera ───────────────────────────────────────────────────────' . $nl
-         . 'if [ ! -d "$ROOT_ENGINE_PATH" ]; then' . $nl
-         . '    echo "GREŠKA: Root engine ne postoji: $ROOT_ENGINE_PATH"' . $nl
-         . '    exit 1' . $nl
-         . 'fi' . $nl
-         . 'if [ ! -f "$ENGINE_SOURCE/ioc_scan.sh" ] || [ ! -f "$ENGINE_SOURCE/scanner_worker.sh" ]; then' . $nl
-         . '    echo "GREŠKA: ENGINE_SOURCE ne sadrži ioc_scan.sh / scanner_worker.sh: $ENGINE_SOURCE"' . $nl
-         . '    echo "Provjeri je li web update primijenjen i ENGINE_SOURCE putanju."' . $nl
-         . '    exit 1' . $nl
-         . 'fi' . $nl
-         . 'echo "Provjere OK"' . $nl
-         . $nl
-         . '# ─── Backup ─────────────────────────────────────────────────────────' . $nl
-         . 'echo "Kreiranje backupa: $BACKUP_PATH"' . $nl
-         . 'cp -a "$ROOT_ENGINE_PATH" "$BACKUP_PATH"' . $nl
-         . 'echo "Backup kreiran."' . $nl
-         . $nl
-         . '# ─── Kopiranje engine fajlova ─────────────────────────────────────' . $nl
-         . 'echo "Kopiranje novih engine fajlova..."' . $nl
-         . '# NE dira scanner-db.conf, logs/ i quarantine/' . $nl
-         . 'rsync -a --exclude="scanner-db.conf" --exclude="logs/" --exclude="quarantine/" "$ENGINE_SOURCE/" "$ROOT_ENGINE_PATH/"' . $nl
-         . 'echo "Kopiranje završeno."' . $nl
-         . $nl
-         . '# ─── Patch scanner-db.conf: dodaj WEB_PANEL_USER/GROUP ako nedostaju ─' . $nl
-         . 'CONF="$ROOT_ENGINE_PATH/scanner-db.conf"' . $nl
-         . 'if [ -f "$CONF" ]; then' . $nl
-         . '    if ! grep -q "^WEB_PANEL_USER=" "$CONF"; then' . $nl
-         . '        echo "" >> "$CONF"' . $nl
-         . '        echo "# Web panel korisnik/grupa (za group-readable karantenu)" >> "$CONF"' . $nl
-         . '        echo "WEB_PANEL_USER=\'\'" >> "$CONF"' . $nl
-         . '        echo "WEB_PANEL_GROUP=\'\'" >> "$CONF"' . $nl
-         . '        echo "  scanner-db.conf: WEB_PANEL_USER/GROUP dodani (prazna vrijednost — uredi po potrebi)"' . $nl
-         . '    else' . $nl
-         . '        echo "  scanner-db.conf: WEB_PANEL_USER već postoji, nema promjena"' . $nl
-         . '    fi' . $nl
-         . 'fi' . $nl
-         . $nl
-         . '# ─── Permisije ───────────────────────────────────────────────────' . $nl
-         . 'echo "Postavljanje permisija..."' . $nl
-         . 'chown -R root:root "$ROOT_ENGINE_PATH"' . $nl
-         . 'chmod 700 "$ROOT_ENGINE_PATH"' . $nl
-         . '[ -f "$ROOT_ENGINE_PATH/scanner-db.conf" ] && chmod 600 "$ROOT_ENGINE_PATH/scanner-db.conf"' . $nl
-         . 'chmod +x "$ROOT_ENGINE_PATH/ioc_scan.sh"' . $nl
-         . 'chmod +x "$ROOT_ENGINE_PATH/scanner_worker.sh"' . $nl
-         . $nl
-         . '# Karantena: group-readable ako WEB_PANEL_GROUP postoji u scanner-db.conf' . $nl
-         . '[ -f "$CONF" ] && source "$CONF" 2>/dev/null || true' . $nl
-         . 'WEB_PANEL_GROUP="${WEB_PANEL_GROUP:-}"' . $nl
-         . 'if [ -n "$WEB_PANEL_GROUP" ] && getent group "$WEB_PANEL_GROUP" >/dev/null 2>&1; then' . $nl
-         . '    chown root:"$WEB_PANEL_GROUP" "$QUARANTINE_BASE_PATH" 2>/dev/null || true' . $nl
-         . '    chmod 750 "$QUARANTINE_BASE_PATH"' . $nl
-         . '    echo "  Karantena: chown root:$WEB_PANEL_GROUP, chmod 750"' . $nl
-         . 'else' . $nl
-         . '    chown root:root "$QUARANTINE_BASE_PATH" 2>/dev/null || true' . $nl
-         . '    chmod 750 "$QUARANTINE_BASE_PATH"' . $nl
-         . '    echo "  Karantena: chown root:root, chmod 750 (WEB_PANEL_GROUP nije konfiguriran)"' . $nl
-         . 'fi' . $nl
-         . $nl
-         . '# ─── Provjera sintakse ───────────────────────────────────────────' . $nl
-         . 'bash -n "$ROOT_ENGINE_PATH/ioc_scan.sh"       && echo "  ioc_scan.sh: OK"' . $nl
-         . 'bash -n "$ROOT_ENGINE_PATH/scanner_worker.sh" && echo "  scanner_worker.sh: OK"' . $nl
-         . $nl
-         . 'echo ""' . $nl
-         . 'echo "=== Root engine ažuriran ==="' . $nl
-         . 'echo "  Putanja:  $ROOT_ENGINE_PATH"' . $nl
-         . 'echo "  Backup:   $BACKUP_PATH"' . $nl
-         . 'echo "  Obriši backup kad si siguran: rm -rf $BACKUP_PATH"' . $nl
-         . 'echo "  Obriši ovu skriptu: rm /root/update_8core_scanner.sh"' . $nl;
+
+    // ── Patch logika za scanner-db.conf ──────────────────
+    // Pravila:
+    // 1. Ako ključ ne postoji → dodaj
+    // 2. Ako postoji ali je prazan → zamijeni
+    // 3. Ako postoji i nije prazan → zamijeni samo ako $overwriteWp
+    $patchUser  = build_conf_patch('WEB_PANEL_USER',  $wpUserQ,  $overwriteWp);
+    $patchGroup = build_conf_patch('WEB_PANEL_GROUP', $wpGroupQ, $overwriteWp);
+
+    $s  = '#!/bin/bash' . $nl
+        . '# 8Core Scanner v2.5.3 — Root engine UPDATE skripta' . $nl
+        . '# Paket verzija: ' . $packageVersion . $nl
+        . '# Generirano: ' . date('Y-m-d H:i:s') . $nl
+        . '# POKRENUTI KAO ROOT: bash /root/update_8core_scanner.sh' . $nl
+        . $nl
+        . 'set -e' . $nl
+        . $nl
+        . 'ROOT_ENGINE_PATH=' . $rootPath . $nl
+        . 'LOG_PATH=' . $logPath . $nl
+        . 'QUARANTINE_BASE_PATH=' . $quarPath . $nl
+        . 'BACKUP_PATH="${ROOT_ENGINE_PATH}_backup_' . $ts . '"' . $nl
+        . $nl
+        . '# Web panel korisnik/grupa za group-readable karantenu' . $nl
+        . 'WEB_PANEL_USER=' . $wpUserQ . $nl
+        . 'WEB_PANEL_GROUP=' . $wpGroupQ . $nl
+        . $nl
+        . '# ENGINE_SOURCE: ažurirana 8core_scanner/ mapa (web update je već primijenjen)' . $nl
+        . 'ENGINE_SOURCE=' . $engineSrcQ . $nl
+        . $nl
+        . '# ─── Provjera ─────────────────────────────────────────────────────' . $nl
+        . 'if [ ! -d "$ROOT_ENGINE_PATH" ]; then' . $nl
+        . '    echo "GREŠKA: Root engine ne postoji: $ROOT_ENGINE_PATH"' . $nl
+        . '    exit 1' . $nl
+        . 'fi' . $nl
+        . 'if [ ! -f "$ENGINE_SOURCE/ioc_scan.sh" ] || [ ! -f "$ENGINE_SOURCE/scanner_worker.sh" ]; then' . $nl
+        . '    echo "GREŠKA: ENGINE_SOURCE ne sadrži ioc_scan.sh / scanner_worker.sh: $ENGINE_SOURCE"' . $nl
+        . '    echo "Provjeri je li web update primijenjen i ENGINE_SOURCE putanju."' . $nl
+        . '    exit 1' . $nl
+        . 'fi' . $nl
+        . 'echo "Provjere OK"' . $nl
+        . $nl
+        . '# ─── Backup ───────────────────────────────────────────────────────' . $nl
+        . 'echo "Kreiranje backupa: $BACKUP_PATH"' . $nl
+        . 'cp -a "$ROOT_ENGINE_PATH" "$BACKUP_PATH"' . $nl
+        . 'echo "Backup kreiran."' . $nl
+        . $nl
+        . '# ─── Kopiranje engine fajlova ────────────────────────────────────' . $nl
+        . 'echo "Kopiranje novih engine fajlova..."' . $nl
+        . 'rsync -a --exclude="scanner-db.conf" --exclude="logs/" --exclude="quarantine/" "$ENGINE_SOURCE/" "$ROOT_ENGINE_PATH/"' . $nl
+        . 'echo "Kopiranje završeno."' . $nl
+        . $nl
+        . '# ─── Patch scanner-db.conf ───────────────────────────────────────' . $nl
+        . 'CONF="$ROOT_ENGINE_PATH/scanner-db.conf"' . $nl
+        . 'if [ -f "$CONF" ]; then' . $nl
+        . $patchUser
+        . $patchGroup
+        . 'else' . $nl
+        . '    echo "  UPOZORENJE: scanner-db.conf ne postoji, patch preskočen"' . $nl
+        . 'fi' . $nl
+        . $nl
+        . '# ─── Permisije engine ────────────────────────────────────────────' . $nl
+        . 'echo "Postavljanje permisija engine direktorija..."' . $nl
+        . 'chown -R root:root "$ROOT_ENGINE_PATH"' . $nl
+        . 'chmod 700 "$ROOT_ENGINE_PATH"' . $nl
+        . '[ -f "$ROOT_ENGINE_PATH/scanner-db.conf" ] && chmod 600 "$ROOT_ENGINE_PATH/scanner-db.conf"' . $nl
+        . 'chmod +x "$ROOT_ENGINE_PATH/ioc_scan.sh"' . $nl
+        . 'chmod +x "$ROOT_ENGINE_PATH/scanner_worker.sh"' . $nl
+        . $nl
+        . '# ─── Karantena: kreiranje i permisije ───────────────────────────' . $nl
+        . 'echo "Postavljanje karantene: $QUARANTINE_BASE_PATH"' . $nl
+        . 'mkdir -p "$QUARANTINE_BASE_PATH"' . $nl
+        . 'if [ -n "$WEB_PANEL_GROUP" ] && getent group "$WEB_PANEL_GROUP" >/dev/null 2>&1; then' . $nl
+        . '    chown root:"$WEB_PANEL_GROUP" "$QUARANTINE_BASE_PATH"' . $nl
+        . '    chmod 750 "$QUARANTINE_BASE_PATH"' . $nl
+        . '    echo "  Karantena: chown root:$WEB_PANEL_GROUP, chmod 750"' . $nl
+        . 'else' . $nl
+        . '    chown root:root "$QUARANTINE_BASE_PATH"' . $nl
+        . '    chmod 750 "$QUARANTINE_BASE_PATH"' . $nl
+        . '    echo "  Karantena: chown root:root, chmod 750 (WEB_PANEL_GROUP nije konfiguriran ili ne postoji)"' . $nl
+        . 'fi' . $nl;
+
+    if ($fixQuarPerms) {
+        $s .= $nl
+            . '# ─── Popravak permisija postojeće karantene (rekurzivno) ────────' . $nl
+            . 'echo "Popravljanje permisija postojeće karantene..."' . $nl
+            . 'if [ -n "$WEB_PANEL_GROUP" ] && getent group "$WEB_PANEL_GROUP" >/dev/null 2>&1; then' . $nl
+            . '    chown -R root:"$WEB_PANEL_GROUP" "$QUARANTINE_BASE_PATH"' . $nl
+            . 'else' . $nl
+            . '    chown -R root:root "$QUARANTINE_BASE_PATH"' . $nl
+            . 'fi' . $nl
+            . 'find "$QUARANTINE_BASE_PATH" -type d -exec chmod 750 {} \;' . $nl
+            . 'find "$QUARANTINE_BASE_PATH" -type f -exec chmod 640 {} \;' . $nl
+            . 'echo "  Permisije karantene popravljene."' . $nl;
+    }
+
+    $s .= $nl
+        . '# ─── Provjera sintakse ──────────────────────────────────────────' . $nl
+        . 'bash -n "$ROOT_ENGINE_PATH/ioc_scan.sh"       && echo "  ioc_scan.sh: OK"' . $nl
+        . 'bash -n "$ROOT_ENGINE_PATH/scanner_worker.sh" && echo "  scanner_worker.sh: OK"' . $nl
+        . $nl
+        . 'echo ""' . $nl
+        . 'echo "=== Root engine ažuriran ==="' . $nl
+        . 'echo "  Putanja:  $ROOT_ENGINE_PATH"' . $nl
+        . 'echo "  Backup:   $BACKUP_PATH"' . $nl
+        . 'echo "  Obriši backup kad si siguran: rm -rf $BACKUP_PATH"' . $nl
+        . 'echo "  Obriši ovu skriptu: rm /root/update_8core_scanner.sh"' . $nl;
+
+    return $s;
+}
+
+// Gradi bash snippet za patch jednog ključa u scanner-db.conf
+function build_conf_patch(string $key, string $quotedVal, bool $overwrite): string {
+    $nl = "\n";
+    // sed escape za bash vrijednost (već je single-quoted u $quotedVal)
+    // Koristimo shell varijable umjesto sed-a radi sigurnosti s posebnim znakovima
+    $out  = '    # Patch ' . $key . $nl;
+    $out .= '    if ! grep -q "^' . $key . '=" "$CONF"; then' . $nl;
+    $out .= '        echo "" >> "$CONF"' . $nl;
+    $out .= '        echo "# Web panel korisnik/grupa (za group-readable karantenu)" >> "$CONF"' . $nl;
+    $out .= '        printf \'%s=%s\n\' \'' . $key . '\' ' . $quotedVal . ' >> "$CONF"' . $nl;
+    $out .= '        echo "  scanner-db.conf: ' . $key . ' dodan"' . $nl;
+    $out .= '    else' . $nl;
+    // Provjeri je li trenutna vrijednost prazna: ^KEY='' ili ^KEY="" ili ^KEY=
+    $out .= '        CURRENT_' . $key . '=$(grep "^' . $key . '=" "$CONF" | head -1 | sed \'s/^' . $key . '=//;s/^["\x27]//;s/["\x27]$//\')' . $nl;
+    if ($overwrite) {
+        // Pregazi uvijek
+        $out .= '        sed -i "s|^' . $key . '=.*|' . $key . '=' . addslashes($quotedVal) . '|" "$CONF"' . $nl;
+        $out .= '        echo "  scanner-db.conf: ' . $key . ' pregazen (overwrite)"' . $nl;
+    } else {
+        // Pregazi samo ako je prazno
+        $out .= '        if [ -z "$CURRENT_' . $key . '" ]; then' . $nl;
+        $out .= '            sed -i "s|^' . $key . '=.*|' . $key . '=' . addslashes($quotedVal) . '|" "$CONF"' . $nl;
+        $out .= '            echo "  scanner-db.conf: ' . $key . ' dopunjen (bio prazan)"' . $nl;
+        $out .= '        else' . $nl;
+        $out .= '            echo "  scanner-db.conf: ' . $key . ' već postoji i nije prazan, preskočen"' . $nl;
+        $out .= '        fi' . $nl;
+    }
+    $out .= '    fi' . $nl;
+    return $out;
 }
 
 // ── Učitaj pending DB migracije ────────────────────────────
 function load_pending_migrations(PDO $pdo): array {
     $dir = __DIR__ . '/../install/migrations/';
     if (!is_dir($dir)) return [];
-
     $files = glob($dir . '*.sql');
     if (!$files) return [];
     sort($files);
-
     $applied = [];
     try {
         $rows = $pdo->query("SELECT migration_name FROM scanner_migrations")->fetchAll(PDO::FETCH_COLUMN);
         $applied = array_flip($rows);
     } catch (Throwable $e) {}
-
     $pending = [];
     foreach ($files as $f) {
         $name = basename($f);
@@ -187,12 +277,43 @@ function apply_migration(PDO $pdo, string $name, string $path): array {
     return $messages;
 }
 
+// ── Auto-detekcija web panel usera ─────────────────────────
+$webAppPath    = rtrim($config['web_app_path'] ?? $webRoot, '/');
+$detectedWp    = detect_web_panel_user($webAppPath);
+
 // ── Stanja stranice ────────────────────────────────────────
-$view     = $_GET['view']   ?? 'main';   // main | dryrun | applied
-$messages = [];
-$dryFiles = [];
+$view              = $_GET['view'] ?? 'main';
+$messages          = [];
+$dryFiles          = [];
 $pendingMigrations = load_pending_migrations($pdo);
-$rootUpdateScript  = generate_root_update_script($config, $packageVersion, $webRoot);
+
+// Vrijednosti za root script formu (persistiramo kroz sesiju)
+$scriptWpUser       = $_SESSION['upd_wp_user']       ?? $detectedWp['user'];
+$scriptWpGroup      = $_SESSION['upd_wp_group']      ?? $detectedWp['group'];
+$scriptOverwriteWp  = $_SESSION['upd_overwrite_wp']  ?? false;
+$scriptFixQuarPerms = $_SESSION['upd_fix_quar_perms'] ?? false;
+
+// ── POST: Regeneracija root skripte (AJAX ili form) ────────
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'regen_script') {
+    csrf_verify();
+    $scriptWpUser       = trim($_POST['wp_user']        ?? $detectedWp['user']) ?: $detectedWp['user'];
+    $scriptWpGroup      = trim($_POST['wp_group']       ?? $detectedWp['group']) ?: $scriptWpUser;
+    $scriptOverwriteWp  = !empty($_POST['overwrite_wp']);
+    $scriptFixQuarPerms = !empty($_POST['fix_quar_perms']);
+    $_SESSION['upd_wp_user']        = $scriptWpUser;
+    $_SESSION['upd_wp_group']       = $scriptWpGroup;
+    $_SESSION['upd_overwrite_wp']   = $scriptOverwriteWp;
+    $_SESSION['upd_fix_quar_perms'] = $scriptFixQuarPerms;
+    // AJAX: vraća samo skriptu
+    if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') {
+        header('Content-Type: text/plain; charset=utf-8');
+        echo generate_root_update_script($config, $packageVersion, $webRoot, $scriptWpUser, $scriptWpGroup, $scriptOverwriteWp, $scriptFixQuarPerms);
+        exit;
+    }
+    // Fallback: redirect
+    header('Location: update.php');
+    exit;
+}
 
 // ── POST: Primjena web updatea ─────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'apply_web') {
@@ -209,20 +330,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'apply
             $iter = new RecursiveIteratorIterator(
                 new RecursiveDirectoryIterator($scannerSrc, RecursiveDirectoryIterator::SKIP_DOTS)
             );
-            $copied   = 0;
-            $skipped  = 0;
+            $copied  = 0;
+            $skipped = 0;
             foreach ($iter as $src) {
                 $relPath = ltrim(str_replace($scannerSrc, '', (string)$src), '/\\');
                 $relPath = str_replace('\\', '/', $relPath);
-                if (!is_safe_zip_path($relPath))       { $skipped++; continue; }
+                if (!is_safe_zip_path($relPath))        { $skipped++; continue; }
                 if (should_skip($relPath, $SKIP_FILES)) { $skipped++; continue; }
-                $dst = $webRoot . '/' . $relPath;
+                $dst    = $webRoot . '/' . $relPath;
                 $dstDir = dirname($dst);
                 if (!is_dir($dstDir)) mkdir($dstDir, 0755, true);
-                if (copy((string)$src, $dst)) {
-                    $messages[] = ['ok' => true, 'text' => "Kopirano: $relPath"];
-                    $copied++;
-                } else {
+                if (copy((string)$src, $dst)) { $copied++; } else {
                     $messages[] = ['ok' => false, 'text' => "Greška kopiranja: $relPath"];
                 }
             }
@@ -240,7 +358,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'apply
                     $eRel = ltrim(str_replace($engineSrc, '', (string)$esrc), '/\\');
                     $eRel = str_replace('\\', '/', $eRel);
                     if (!is_safe_zip_path($eRel)) continue;
-                    $eDst = $engineDst . '/' . $eRel;
+                    $eDst    = $engineDst . '/' . $eRel;
                     $eDstDir = dirname($eDst);
                     if (!is_dir($eDstDir)) mkdir($eDstDir, 0755, true);
                     if (copy((string)$esrc, $eDst)) $engCopied++;
@@ -251,8 +369,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'apply
             // Ažuriraj verziju u settings
             $newVer = trim(@file_get_contents($tmpDir . '/scanner/VERSION') ?: $packageVersion);
             try {
-                $pdo->prepare("INSERT INTO scanner_settings (setting_key, setting_value) VALUES ('installed_version', ?) ON DUPLICATE KEY UPDATE setting_value=?, updated_at=NOW()")->execute([$newVer, $newVer]);
-                $pdo->prepare("INSERT INTO scanner_settings (setting_key, setting_value) VALUES ('last_updated_at', NOW()) ON DUPLICATE KEY UPDATE setting_value=NOW(), updated_at=NOW()")->execute([]);
+                $pdo->prepare("INSERT INTO scanner_settings (setting_key,setting_value) VALUES ('installed_version',?) ON DUPLICATE KEY UPDATE setting_value=?,updated_at=NOW()")->execute([$newVer,$newVer]);
+                $pdo->prepare("INSERT INTO scanner_settings (setting_key,setting_value) VALUES ('last_updated_at',NOW()) ON DUPLICATE KEY UPDATE setting_value=NOW(),updated_at=NOW()")->execute([]);
             } catch (Throwable $e) {}
         }
         // Obriši temp
@@ -277,7 +395,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'apply
         $messages[] = ['ok' => true, 'text' => 'Nema pending migracija.'];
     }
     foreach ($pending as $mig) {
-        $msgs = apply_migration($pdo, $mig['name'], $mig['path']);
+        $msgs     = apply_migration($pdo, $mig['name'], $mig['path']);
         $messages = array_merge($messages, $msgs);
     }
     $pendingMigrations = load_pending_migrations($pdo);
@@ -295,25 +413,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'uploa
     } else {
         $tmpDir = sys_get_temp_dir() . '/8core_update_' . bin2hex(random_bytes(8));
         mkdir($tmpDir, 0700, true);
-
         $zip = new ZipArchive();
         if ($zip->open($file['tmp_name']) !== true) {
             $messages[] = ['ok' => false, 'text' => 'Ne mogu otvoriti ZIP fajl.'];
         } else {
-            // Provjera strukture i path traversal
-            $hasScanner      = false;
-            $hasEngine       = false;
-            $pathTraversal   = false;
-
+            $hasScanner    = false;
+            $pathTraversal = false;
             for ($i = 0; $i < $zip->numFiles; $i++) {
                 $entry = $zip->getNameIndex($i);
                 if (!is_safe_zip_path($entry)) { $pathTraversal = true; break; }
-                // Normalizacija: ukloni leading 8core-scanner-v2/
                 $norm = preg_replace('#^8core-scanner-v2/#', '', $entry);
-                if (strpos($norm, 'scanner/') === 0) $hasScanner = true;
-                if (strpos($norm, '8core_scanner/') === 0) $hasEngine = true;
+                if (strpos($norm, 'scanner/') === 0)     $hasScanner = true;
             }
-
             if ($pathTraversal) {
                 $messages[] = ['ok' => false, 'text' => 'ZIP sadrži opasne putanje (path traversal). Odbijeno.'];
             } elseif (!$hasScanner) {
@@ -321,15 +432,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'uploa
             } else {
                 $zip->extractTo($tmpDir);
                 $zip->close();
-
-                // Normalizacija: ako je upakovano kao 8core-scanner-v2/scanner/...
-                // pronalazimo stvarni scanner/ direktorij
-                $scannerDir = $tmpDir . '/scanner';
-                if (!is_dir($scannerDir)) {
-                    // Pokušaj s prefixom
+                // Normalizacija ako je upakovano kao 8core-scanner-v2/...
+                if (!is_dir($tmpDir . '/scanner')) {
                     $dirs = glob($tmpDir . '/*/scanner', GLOB_ONLYDIR);
                     if ($dirs) {
-                        // Premjesti na očekivanu lokaciju
                         rename(dirname($dirs[0]), $tmpDir . '/_pkg');
                         rename($tmpDir . '/_pkg/scanner', $tmpDir . '/scanner');
                         if (is_dir($tmpDir . '/_pkg/8core_scanner')) {
@@ -337,8 +443,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'uploa
                         }
                     }
                 }
-
-                // Dry-run: prikupi fajlove
                 if (is_dir($tmpDir . '/scanner')) {
                     $iter = new RecursiveIteratorIterator(
                         new RecursiveDirectoryIterator($tmpDir . '/scanner', RecursiveDirectoryIterator::SKIP_DOTS)
@@ -347,19 +451,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'uploa
                         $relPath = ltrim(str_replace($tmpDir . '/scanner', '', (string)$f2), '/\\');
                         $relPath = str_replace('\\', '/', $relPath);
                         if (!is_safe_zip_path($relPath)) continue;
-                        $skipped = should_skip($relPath, $SKIP_FILES);
-                        $exists  = file_exists($webRoot . '/' . $relPath);
-                        $dryFiles[] = ['path' => $relPath, 'skipped' => $skipped, 'exists' => $exists];
+                        $skip = should_skip($relPath, $SKIP_FILES);
+                        $exists = file_exists($webRoot . '/' . $relPath);
+                        $dryFiles[] = ['path' => $relPath, 'skipped' => $skip, 'exists' => $exists];
                     }
                     $messages[] = ['ok' => true, 'text' => 'ZIP uspješno raspakiran. Pregled ispod.'];
                     $view = 'dryrun';
-                    // Provjera migracija u paketu
                     $pkgMigDir = $tmpDir . '/scanner/install/migrations/';
                     if (is_dir($pkgMigDir)) {
                         $pkgMigs = glob($pkgMigDir . '*.sql') ?: [];
                         $messages[] = ['ok' => true, 'text' => count($pkgMigs) . ' SQL migracij(a) pronađeno u paketu.'];
                     }
-                    // Čuvamo tmpDir u sesiji za apply
                     $_SESSION['update_tmp_dir'] = $tmpDir;
                 } else {
                     $messages[] = ['ok' => false, 'text' => 'scanner/ mapa nije pronađena u raspakiranom ZIP-u.'];
@@ -371,6 +473,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'uploa
 
 // Povrati tmpDir iz sesije za apply
 $tmpDirForApply = $_SESSION['update_tmp_dir'] ?? '';
+
+// Generiraj root update skriptu s trenutnim postavkama
+$rootUpdateScript = generate_root_update_script(
+    $config, $packageVersion, $webRoot,
+    $scriptWpUser, $scriptWpGroup, $scriptOverwriteWp, $scriptFixQuarPerms
+);
 ?>
 <!doctype html>
 <html lang="hr">
@@ -380,13 +488,12 @@ $tmpDirForApply = $_SESSION['update_tmp_dir'] ?? '';
 <title>8Core Scanner – Update</title>
 <link rel="stylesheet" href="../assets/css/scanner.css">
 <style>
-.upd-grid { display:grid; grid-template-columns:1fr; gap:16px; }
-.upd-section { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:20px 22px; }
+.upd-section { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:20px 22px; margin-bottom:16px; }
 .upd-section h3 { margin:0 0 12px; font-size:13px; font-weight:700; color:var(--text); display:flex; align-items:center; gap:8px; }
 .upd-section h3 .badge-num { background:var(--accent,#2563eb); color:#fff; border-radius:999px; padding:1px 7px; font-size:11px; }
 .upd-info-row { display:flex; gap:12px; align-items:baseline; font-size:13px; padding:4px 0; border-bottom:1px solid var(--bg); }
 .upd-info-row:last-child { border-bottom:none; }
-.upd-info-label { color:var(--text-muted); flex-shrink:0; width:150px; }
+.upd-info-label { color:var(--text-muted); flex-shrink:0; width:160px; }
 .upd-info-val { color:var(--text); font-family:var(--font-mono,monospace); font-size:12px; }
 .dry-table { width:100%; border-collapse:collapse; font-size:12px; }
 .dry-table th { text-align:left; padding:5px 8px; font-size:11px; font-weight:700; color:var(--text-muted); border-bottom:1px solid var(--border); }
@@ -394,12 +501,12 @@ $tmpDirForApply = $_SESSION['update_tmp_dir'] ?? '';
 .dry-skip   { color:var(--text-muted); }
 .dry-new    { color:#4ade80; }
 .dry-update { color:#60a5fa; }
-.msg-ok   { color:#4ade80; }
-.msg-err  { color:#f87171; }
-.upd-script-wrap { position:relative; }
-.upd-script-wrap textarea { width:100%; height:280px; background:#020617; border:1px solid var(--border); border-radius:7px; color:#86efac; font-family:var(--font-mono,monospace); font-size:11px; padding:12px; resize:vertical; outline:none; line-height:1.5; }
+.msg-ok  { color:#4ade80; }
+.msg-err { color:#f87171; }
+.upd-script-wrap textarea { width:100%; height:340px; background:#020617; border:1px solid var(--border); border-radius:7px; color:#86efac; font-family:var(--font-mono,monospace); font-size:11px; padding:12px; resize:vertical; outline:none; line-height:1.5; }
 .script-copy-bar { display:flex; justify-content:flex-end; margin-bottom:6px; }
-.btn-copy { background:var(--bg); color:#60a5fa; border:1px solid var(--border); border-radius:6px; padding:6px 12px; font-size:12px; font-family:inherit; cursor:pointer; }
+.btn-copy { background:var(--bg); color:#60a5fa; border:1px solid var(--border); border-radius:6px; padding:6px 12px; font-size:12px; font-family:inherit; cursor:pointer; transition:background .12s; }
+.btn-copy:hover { background:var(--surface); }
 .mig-item { display:flex; align-items:center; gap:10px; padding:5px 0; border-bottom:1px solid var(--bg); font-size:13px; }
 .mig-item:last-child { border-bottom:none; }
 .mig-name { font-family:var(--font-mono,monospace); font-size:12px; flex:1; }
@@ -410,6 +517,19 @@ $tmpDirForApply = $_SESSION['update_tmp_dir'] ?? '';
 .msg-list li { padding:3px 0; font-size:13px; border-bottom:1px solid var(--bg); font-family:var(--font-mono,monospace); }
 .msg-list li:last-child { border-bottom:none; }
 code { background:var(--bg); padding:1px 5px; border-radius:4px; font-size:12px; font-family:var(--font-mono,monospace); }
+/* Web panel form */
+.wp-form { display:grid; grid-template-columns:1fr 1fr; gap:10px 16px; margin-bottom:14px; }
+.wp-field label { display:block; font-size:11px; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:.04em; margin-bottom:4px; }
+.wp-field input[type=text] { width:100%; padding:7px 10px; background:var(--bg); border:1px solid var(--border); border-radius:6px; color:var(--text); font-family:var(--font-mono,monospace); font-size:13px; outline:none; transition:border-color .13s; }
+.wp-field input[type=text]:focus { border-color:#2563eb; box-shadow:0 0 0 3px rgba(37,99,235,.18); }
+.wp-check { display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text-muted); cursor:pointer; padding:4px 0; }
+.wp-check input[type=checkbox] { width:15px; height:15px; accent-color:#2563eb; cursor:pointer; }
+.wp-checks { display:flex; flex-direction:column; gap:4px; margin-bottom:14px; }
+.wp-detected { font-size:11px; color:#64748b; margin-top:3px; font-family:var(--font-mono,monospace); }
+.wp-regen-btn { display:inline-flex; align-items:center; gap:6px; padding:7px 14px; background:#1e3a5f; color:#60a5fa; border:1px solid #2563eb; border-radius:6px; font-family:inherit; font-size:13px; font-weight:600; cursor:pointer; transition:background .12s; }
+.wp-regen-btn:hover { background:#1d4ed8; color:#fff; }
+.wp-regen-btn:disabled { opacity:.5; cursor:default; }
+.wp-status { font-size:12px; color:#4ade80; margin-left:10px; }
 </style>
 </head>
 <body>
@@ -435,7 +555,7 @@ code { background:var(--bg); padding:1px 5px; border-radius:4px; font-size:12px;
 
     <?php if ($view === 'dryrun'): ?>
       <!-- ── DRY-RUN PRIKAZ ── -->
-      <div class="upd-section" style="margin-bottom:16px;">
+      <div class="upd-section">
         <h3>Dry-run — pregled fajlova</h3>
         <div class="upd-warning">Provjeri listu prije primjene. <code>config.php</code> i <code>install.lock</code> se nikad ne prepisuju.</div>
         <table class="dry-table">
@@ -443,9 +563,9 @@ code { background:var(--bg); padding:1px 5px; border-radius:4px; font-size:12px;
           <tbody>
           <?php foreach ($dryFiles as $df): ?>
             <?php
-            if ($df['skipped']) { $cls = 'dry-skip'; $act = 'PRESKOČI (zaštićeno)'; }
-            elseif (!$df['exists']) { $cls = 'dry-new'; $act = 'NOVI FAJL'; }
-            else { $cls = 'dry-update'; $act = 'AŽURIRAJ'; }
+            if ($df['skipped'])       { $cls = 'dry-skip';   $act = 'PRESKOČI (zaštićeno)'; }
+            elseif (!$df['exists'])   { $cls = 'dry-new';    $act = 'NOVI FAJL'; }
+            else                      { $cls = 'dry-update'; $act = 'AŽURIRAJ'; }
             ?>
             <tr class="<?= $cls ?>"><td><?= h($df['path']) ?></td><td><?= $act ?></td></tr>
           <?php endforeach; ?>
@@ -453,7 +573,7 @@ code { background:var(--bg); padding:1px 5px; border-radius:4px; font-size:12px;
         </table>
         <div style="margin-top:14px;display:flex;gap:10px;">
           <form method="post">
-            <input type="hidden" name="action" value="apply_web">
+            <input type="hidden" name="action"  value="apply_web">
             <input type="hidden" name="tmp_dir" value="<?= h($tmpDirForApply) ?>">
             <?= csrf_field() ?>
             <button type="submit" class="btn btn-primary" onclick="return confirm('Primijeniti web update?')">Primijeni web update</button>
@@ -463,7 +583,7 @@ code { background:var(--bg); padding:1px 5px; border-radius:4px; font-size:12px;
       </div>
 
     <?php elseif ($view === 'applied'): ?>
-      <div class="upd-section" style="margin-bottom:16px;">
+      <div class="upd-section">
         <h3>Update primijenjen</h3>
         <p style="color:var(--text-muted);font-size:13px;">Provjeri <a href="about.php">O scanneru</a> stranicu za novi zdravstveni pregled.</p>
         <a href="update.php" class="btn btn-ghost btn-sm">Natrag na Update</a>
@@ -471,19 +591,16 @@ code { background:var(--bg); padding:1px 5px; border-radius:4px; font-size:12px;
 
     <?php else: ?>
       <!-- ── GLAVNA STRANICA ── -->
-
-      <!-- Informacije o verzijama -->
-      <div class="upd-section" style="margin-bottom:16px;">
+      <div class="upd-section">
         <h3>Verzije</h3>
         <div class="upd-info-row"><span class="upd-info-label">Instalirana verzija</span><span class="upd-info-val"><?= h($installedVersion) ?></span></div>
         <div class="upd-info-row"><span class="upd-info-label">Paket verzija</span><span class="upd-info-val"><?= h($packageVersion) ?></span></div>
       </div>
-
     <?php endif; ?>
 
     <!-- ── A) WEB PANEL UPDATE ── -->
     <?php if ($view === 'main'): ?>
-    <div class="upd-section" style="margin-bottom:16px;">
+    <div class="upd-section">
       <h3>A) Web panel update</h3>
       <div class="upd-warning">
         Update <strong>nikad ne prepisuje</strong>: <code>includes/config.php</code>, <code>install/install.lock</code>.
@@ -497,24 +614,21 @@ code { background:var(--bg); padding:1px 5px; border-radius:4px; font-size:12px;
           <button type="submit" class="btn btn-primary">Upload i dry-run</button>
         </div>
         <p style="font-size:12px;color:var(--text-muted);margin:8px 0 0;">
-          Uploadaj ZIP paket (npr. <code>8core-scanner-v2-structure-fix6.zip</code>).
-          Stranica prikazuje dry-run prikaz prije primjene.
+          Uploadaj ZIP paket (npr. <code>8core-scanner-v2.5.3.zip</code>). Prikazuje dry-run prikaz prije primjene.
         </p>
       </form>
     </div>
     <?php endif; ?>
 
     <!-- ── B) DATABASE MIGRACIJE ── -->
-    <div class="upd-section" style="margin-bottom:16px;">
+    <div class="upd-section">
       <h3>
         B) Migracije baze podataka
         <?php if (count($pendingMigrations) > 0): ?>
           <span class="badge-num"><?= count($pendingMigrations) ?> pending</span>
         <?php endif; ?>
       </h3>
-
       <?php
-      // Sve migracije — primjenjene i pending
       $allMigFiles = glob(__DIR__ . '/../install/migrations/*.sql') ?: [];
       sort($allMigFiles);
       $appliedMigs = [];
@@ -523,15 +637,14 @@ code { background:var(--bg); padding:1px 5px; border-radius:4px; font-size:12px;
           foreach ($rows as $r) $appliedMigs[$r['migration_name']] = $r['applied_at'];
       } catch (Throwable $e) {}
       ?>
-
       <?php if (empty($allMigFiles)): ?>
         <p style="font-size:13px;color:var(--text-muted);">Nema SQL migration fajlova u <code>install/migrations/</code>.</p>
       <?php else: ?>
         <?php foreach ($allMigFiles as $mf): ?>
-          <?php $mname = basename($mf); $applied = isset($appliedMigs[$mname]); ?>
+          <?php $mname = basename($mf); $applied2 = isset($appliedMigs[$mname]); ?>
           <div class="mig-item">
             <span class="mig-name"><?= h($mname) ?></span>
-            <?php if ($applied): ?>
+            <?php if ($applied2): ?>
               <span class="mig-status-applied">PRIMJENJENO <?= h(substr($appliedMigs[$mname], 0, 10)) ?></span>
             <?php else: ?>
               <span class="mig-status-pending">PENDING</span>
@@ -539,7 +652,6 @@ code { background:var(--bg); padding:1px 5px; border-radius:4px; font-size:12px;
           </div>
         <?php endforeach; ?>
       <?php endif; ?>
-
       <?php if (!empty($pendingMigrations)): ?>
         <div style="margin-top:14px;">
           <form method="post" onsubmit="return confirm('Primijeniti <?= count($pendingMigrations) ?> pending migracij(a)?')">
@@ -556,18 +668,54 @@ code { background:var(--bg); padding:1px 5px; border-radius:4px; font-size:12px;
     <!-- ── C) ROOT ENGINE UPDATE ── -->
     <div class="upd-section">
       <h3>C) Root engine update</h3>
-      <p style="font-size:13px;color:var(--text-muted);margin:0 0 10px;">
+      <p style="font-size:13px;color:var(--text-muted);margin:0 0 14px;">
         Web panel ne može direktno pisati u root direktorije.
-        Kopirajte skriptu i pokrenite je kao root.
+        Konfiguriraj opcije ispod, kopiraj skriptu i pokreni kao root.
         <strong>Root lozinka se ne unosi kroz browser.</strong>
       </p>
-      <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px;">
-        Uredi <code>ENGINE_SOURCE</code> varijablu u skripti na stvarnu putanju raspakirane <code>8core_scanner/</code> mape iz paketa.
-      </p>
-      <div class="upd-script-wrap">
-        <div class="script-copy-bar">
-          <button class="btn-copy" onclick="copyScript()">Kopiraj skriptu</button>
+
+      <!-- Web panel permisije forma -->
+      <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:16px 18px;margin-bottom:16px;">
+        <div style="font-size:12px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px;">
+          Web panel permisije karantene
         </div>
+        <div class="wp-form">
+          <div class="wp-field">
+            <label>WEB_PANEL_USER</label>
+            <input type="text" id="wpUser" value="<?= h($scriptWpUser) ?>" placeholder="8core5">
+            <div class="wp-detected">Auto-detektirano: <?= h($detectedWp['user']) ?></div>
+          </div>
+          <div class="wp-field">
+            <label>WEB_PANEL_GROUP</label>
+            <input type="text" id="wpGroup" value="<?= h($scriptWpGroup) ?>" placeholder="8core5">
+            <div class="wp-detected">Auto-detektirano: <?= h($detectedWp['group']) ?></div>
+          </div>
+        </div>
+        <div class="wp-checks">
+          <label class="wp-check">
+            <input type="checkbox" id="overwriteWp" <?= $scriptOverwriteWp ? 'checked' : '' ?>>
+            Pregazi postojeće WEB_PANEL_USER/GROUP vrijednosti u root configu (i ako nisu prazne)
+          </label>
+          <label class="wp-check">
+            <input type="checkbox" id="fixQuarPerms" <?= $scriptFixQuarPerms ? 'checked' : '' ?>>
+            Popravi permisije postojeće karantene rekurzivno
+            <span style="color:#64748b;font-size:11px;">(chown -R + find chmod 750/640)</span>
+          </label>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;">
+          <button class="wp-regen-btn" id="regenBtn" onclick="regenScript()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 .49-3.1"/></svg>
+            Regeneriraj skriptu
+          </button>
+          <span class="wp-status" id="regenStatus" style="display:none;">Skripta ažurirana.</span>
+        </div>
+      </div>
+
+      <!-- Root update skripta -->
+      <div class="script-copy-bar">
+        <button class="btn-copy" onclick="copyScript()">Kopiraj skriptu</button>
+      </div>
+      <div class="upd-script-wrap">
         <textarea id="rootUpdateScript" readonly spellcheck="false"><?= h($rootUpdateScript) ?></textarea>
       </div>
       <div style="margin-top:10px;font-size:12px;color:var(--text-muted);">
@@ -581,22 +729,67 @@ code { background:var(--bg); padding:1px 5px; border-radius:4px; font-size:12px;
 </div>
 
 <script>
+var csrfToken = <?= json_encode(csrf_token()) ?>;
+
+function regenScript() {
+    var btn    = document.getElementById('regenBtn');
+    var status = document.getElementById('regenStatus');
+    var wpUser   = document.getElementById('wpUser').value.trim();
+    var wpGroup  = document.getElementById('wpGroup').value.trim();
+    var overwrite = document.getElementById('overwriteWp').checked ? '1' : '';
+    var fixQuar   = document.getElementById('fixQuarPerms').checked ? '1' : '';
+
+    btn.disabled = true;
+    btn.textContent = 'Generiranje...';
+    status.style.display = 'none';
+
+    var body = new URLSearchParams();
+    body.append('action',        'regen_script');
+    body.append('wp_user',       wpUser);
+    body.append('wp_group',      wpGroup);
+    body.append('overwrite_wp',  overwrite);
+    body.append('fix_quar_perms', fixQuar);
+    if (csrfToken) body.append('csrf_token', csrfToken);
+
+    fetch('update.php', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: body.toString()
+    })
+    .then(function(r) { return r.text(); })
+    .then(function(text) {
+        document.getElementById('rootUpdateScript').value = text;
+        status.style.display = '';
+        setTimeout(function() { status.style.display = 'none'; }, 3000);
+    })
+    .catch(function() {
+        status.textContent = 'Greška pri regeneraciji.';
+        status.style.color = '#f87171';
+        status.style.display = '';
+    })
+    .finally(function() {
+        btn.disabled = false;
+        btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 .49-3.1"/></svg> Regeneriraj skriptu';
+    });
+}
+
 function copyScript() {
     var ta  = document.getElementById('rootUpdateScript');
     var btn = document.querySelector('.btn-copy');
     if (!ta) return;
     ta.select();
     ta.setSelectionRange(0, 999999);
-    try {
-        navigator.clipboard.writeText(ta.value).then(function() {
-            btn.textContent = 'Kopirano!';
-            setTimeout(function(){ btn.textContent = 'Kopiraj skriptu'; }, 2500);
-        });
-    } catch (e) {
+    navigator.clipboard.writeText(ta.value).then(function() {
+        btn.textContent = 'Kopirano!';
+        setTimeout(function() { btn.textContent = 'Kopiraj skriptu'; }, 2500);
+    }).catch(function() {
         document.execCommand('copy');
         btn.textContent = 'Kopirano!';
-        setTimeout(function(){ btn.textContent = 'Kopiraj skriptu'; }, 2500);
-    }
+        setTimeout(function() { btn.textContent = 'Kopiraj skriptu'; }, 2500);
+    });
 }
 </script>
 </body>
