@@ -53,11 +53,16 @@ function sh_quote_update(string $value): string {
     return "'" . str_replace("'", "'\"'\"'", $value) . "'";
 }
 
-function generate_root_update_script(array $cfg, string $packageVersion): string {
-    $rootPath = sh_quote_update($cfg['root_engine_path'] ?? '/root/8core_scanner');
-    $logPath  = sh_quote_update(dirname($cfg['scan_log']  ?? '/root/8core_scanner/logs/x'));
-    $quarPath = sh_quote_update($cfg['quarantine_path']   ?? '/home/8core_quarantine');
-    $ts       = date('YmdHis');
+function generate_root_update_script(array $cfg, string $packageVersion, string $webRoot): string {
+    $rootPath   = sh_quote_update($cfg['root_engine_path'] ?? '/root/8core_scanner');
+    $logPath    = sh_quote_update(dirname($cfg['scan_log']  ?? '/root/8core_scanner/logs/x'));
+    $quarPath   = sh_quote_update($cfg['quarantine_path']   ?? '/home/8core_quarantine');
+    $ts         = date('YmdHis');
+
+    // Derive ENGINE_SOURCE from web_app_path: sibling 8core_scanner/ next to scanner/
+    $webAppPath = rtrim($cfg['web_app_path'] ?? $webRoot, '/');
+    $engineSrc  = dirname($webAppPath) . '/8core_scanner';
+    $engineSrcQ = sh_quote_update($engineSrc);
 
     $nl = "\n";
     return '#!/bin/bash' . $nl
@@ -73,8 +78,8 @@ function generate_root_update_script(array $cfg, string $packageVersion): string
          . 'QUARANTINE_BASE_PATH=' . $quarPath . $nl
          . 'BACKUP_PATH="${ROOT_ENGINE_PATH}_backup_' . $ts . '"' . $nl
          . $nl
-         . '# ENGINE_SOURCE mora biti putanja do raspakirane mape 8core_scanner/ iz ZIP paketa' . $nl
-         . 'ENGINE_SOURCE="/ZAMIJENI/putanjom/do/8core_scanner"' . $nl
+         . '# ENGINE_SOURCE: putanja do ažurirane 8core_scanner/ mape (web update je već primijenjen)' . $nl
+         . 'ENGINE_SOURCE=' . $engineSrcQ . $nl
          . $nl
          . '# ─── Provjera ───────────────────────────────────────────────────────' . $nl
          . 'if [ ! -d "$ROOT_ENGINE_PATH" ]; then' . $nl
@@ -82,7 +87,8 @@ function generate_root_update_script(array $cfg, string $packageVersion): string
          . '    exit 1' . $nl
          . 'fi' . $nl
          . 'if [ ! -f "$ENGINE_SOURCE/ioc_scan.sh" ] || [ ! -f "$ENGINE_SOURCE/scanner_worker.sh" ]; then' . $nl
-         . '    echo "GREŠKA: ENGINE_SOURCE ne sadrži ioc_scan.sh / scanner_worker.sh"' . $nl
+         . '    echo "GREŠKA: ENGINE_SOURCE ne sadrži ioc_scan.sh / scanner_worker.sh: $ENGINE_SOURCE"' . $nl
+         . '    echo "Provjeri je li web update primijenjen i ENGINE_SOURCE putanju."' . $nl
          . '    exit 1' . $nl
          . 'fi' . $nl
          . 'echo "Provjere OK"' . $nl
@@ -94,9 +100,23 @@ function generate_root_update_script(array $cfg, string $packageVersion): string
          . $nl
          . '# ─── Kopiranje engine fajlova ─────────────────────────────────────' . $nl
          . 'echo "Kopiranje novih engine fajlova..."' . $nl
-         . '# Kopira fajlove, NE dira scanner-db.conf, logs/ i quarantine/' . $nl
+         . '# NE dira scanner-db.conf, logs/ i quarantine/' . $nl
          . 'rsync -a --exclude="scanner-db.conf" --exclude="logs/" --exclude="quarantine/" "$ENGINE_SOURCE/" "$ROOT_ENGINE_PATH/"' . $nl
          . 'echo "Kopiranje završeno."' . $nl
+         . $nl
+         . '# ─── Patch scanner-db.conf: dodaj WEB_PANEL_USER/GROUP ako nedostaju ─' . $nl
+         . 'CONF="$ROOT_ENGINE_PATH/scanner-db.conf"' . $nl
+         . 'if [ -f "$CONF" ]; then' . $nl
+         . '    if ! grep -q "^WEB_PANEL_USER=" "$CONF"; then' . $nl
+         . '        echo "" >> "$CONF"' . $nl
+         . '        echo "# Web panel korisnik/grupa (za group-readable karantenu)" >> "$CONF"' . $nl
+         . '        echo "WEB_PANEL_USER=\'\'" >> "$CONF"' . $nl
+         . '        echo "WEB_PANEL_GROUP=\'\'" >> "$CONF"' . $nl
+         . '        echo "  scanner-db.conf: WEB_PANEL_USER/GROUP dodani (prazna vrijednost — uredi po potrebi)"' . $nl
+         . '    else' . $nl
+         . '        echo "  scanner-db.conf: WEB_PANEL_USER već postoji, nema promjena"' . $nl
+         . '    fi' . $nl
+         . 'fi' . $nl
          . $nl
          . '# ─── Permisije ───────────────────────────────────────────────────' . $nl
          . 'echo "Postavljanje permisija..."' . $nl
@@ -105,6 +125,19 @@ function generate_root_update_script(array $cfg, string $packageVersion): string
          . '[ -f "$ROOT_ENGINE_PATH/scanner-db.conf" ] && chmod 600 "$ROOT_ENGINE_PATH/scanner-db.conf"' . $nl
          . 'chmod +x "$ROOT_ENGINE_PATH/ioc_scan.sh"' . $nl
          . 'chmod +x "$ROOT_ENGINE_PATH/scanner_worker.sh"' . $nl
+         . $nl
+         . '# Karantena: group-readable ako WEB_PANEL_GROUP postoji u scanner-db.conf' . $nl
+         . '[ -f "$CONF" ] && source "$CONF" 2>/dev/null || true' . $nl
+         . 'WEB_PANEL_GROUP="${WEB_PANEL_GROUP:-}"' . $nl
+         . 'if [ -n "$WEB_PANEL_GROUP" ] && getent group "$WEB_PANEL_GROUP" >/dev/null 2>&1; then' . $nl
+         . '    chown root:"$WEB_PANEL_GROUP" "$QUARANTINE_BASE_PATH" 2>/dev/null || true' . $nl
+         . '    chmod 750 "$QUARANTINE_BASE_PATH"' . $nl
+         . '    echo "  Karantena: chown root:$WEB_PANEL_GROUP, chmod 750"' . $nl
+         . 'else' . $nl
+         . '    chown root:root "$QUARANTINE_BASE_PATH" 2>/dev/null || true' . $nl
+         . '    chmod 750 "$QUARANTINE_BASE_PATH"' . $nl
+         . '    echo "  Karantena: chown root:root, chmod 750 (WEB_PANEL_GROUP nije konfiguriran)"' . $nl
+         . 'fi' . $nl
          . $nl
          . '# ─── Provjera sintakse ───────────────────────────────────────────' . $nl
          . 'bash -n "$ROOT_ENGINE_PATH/ioc_scan.sh"       && echo "  ioc_scan.sh: OK"' . $nl
@@ -159,7 +192,7 @@ $view     = $_GET['view']   ?? 'main';   // main | dryrun | applied
 $messages = [];
 $dryFiles = [];
 $pendingMigrations = load_pending_migrations($pdo);
-$rootUpdateScript  = generate_root_update_script($config, $packageVersion);
+$rootUpdateScript  = generate_root_update_script($config, $packageVersion, $webRoot);
 
 // ── POST: Primjena web updatea ─────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'apply_web') {
@@ -194,6 +227,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'apply
                 }
             }
             $messages[] = ['ok' => true, 'text' => "Web update završen. Kopirano: $copied, Preskočeno: $skipped"];
+
+            // Kopiranje 8core_scanner/ staged uz web root (sibling direktorij)
+            $engineSrc = $tmpDir . '/8core_scanner';
+            if (is_dir($engineSrc)) {
+                $engineDst = dirname($webRoot) . '/8core_scanner';
+                $iter2 = new RecursiveIteratorIterator(
+                    new RecursiveDirectoryIterator($engineSrc, RecursiveDirectoryIterator::SKIP_DOTS)
+                );
+                $engCopied = 0;
+                foreach ($iter2 as $esrc) {
+                    $eRel = ltrim(str_replace($engineSrc, '', (string)$esrc), '/\\');
+                    $eRel = str_replace('\\', '/', $eRel);
+                    if (!is_safe_zip_path($eRel)) continue;
+                    $eDst = $engineDst . '/' . $eRel;
+                    $eDstDir = dirname($eDst);
+                    if (!is_dir($eDstDir)) mkdir($eDstDir, 0755, true);
+                    if (copy((string)$esrc, $eDst)) $engCopied++;
+                }
+                $messages[] = ['ok' => true, 'text' => "8core_scanner/ kopiran u: $engineDst ($engCopied fajlova)"];
+            }
 
             // Ažuriraj verziju u settings
             $newVer = trim(@file_get_contents($tmpDir . '/scanner/VERSION') ?: $packageVersion);

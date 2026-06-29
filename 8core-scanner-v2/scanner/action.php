@@ -31,7 +31,7 @@ if (!in_array($action, $allowed, true)) {
 
 if (!empty($_POST['ids']) && is_array($_POST['ids'])) {
     $ids = array_map('intval', $_POST['ids']);
-    $ids = array_filter($ids, fn($v) => $v > 0);
+    $ids = array_filter($ids, function($v) { return $v > 0; });
 } elseif (!empty($_POST['id'])) {
     $ids = [(int)$_POST['id']];
 } else {

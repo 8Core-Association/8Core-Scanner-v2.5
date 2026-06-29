@@ -18,7 +18,7 @@ return [
     'default_admin_pass' => 'PromijeniOvuLozinku2026!',
 
     // Globalni prekidač za CSRF zaštitu (true = uključeno, false = isključeno)
-    'csrf_enabled' => true,
+    'csrf_enabled' => false,
 
     'web_app_path' => '/var/www/html/scanner',
     'web_app_url'  => 'https://domena.hr/scanner',
@@ -27,5 +27,5 @@ return [
     'scan_script'      => '/root/8core_scanner/ioc_scan.sh',
     'scan_log'         => '/root/8core_scanner/logs/ioc-scan-live.log',
     'scan_debug'       => '/root/8core_scanner/logs/ioc-debug.log',
-    'quarantine_path'  => '/root/8core_scanner/quarantine',
+    'quarantine_path'  => '/home/8core_quarantine',
 ];

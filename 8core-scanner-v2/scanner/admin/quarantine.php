@@ -539,7 +539,7 @@ $backParams = http_build_query([
     </form>
 
     <!-- COUNTER -->
-    <?php $quarantinedCount = count(array_filter($findings, fn($f) => $f['action_status'] === 'quarantined')); ?>
+    <?php $quarantinedCount = count(array_filter($findings, function($f) { return $f['action_status'] === 'quarantined'; })); ?>
     <div class="quar-counter">
       Prikazano <strong><?= count($findings) ?></strong> nalaza.
       <?php if ($quarantinedCount > 0): ?>

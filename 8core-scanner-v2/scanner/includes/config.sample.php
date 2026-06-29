@@ -25,7 +25,7 @@ return [
     'default_admin_pass' => 'PromijeniOvuLozinku2026!',
 
     // Globalni prekidač za CSRF zaštitu (true = uključeno, false = isključeno)
-    'csrf_enabled' => true,
+    'csrf_enabled' => false,
 
     // ── Web aplikacija ────────────────────────────────────────────────────
     'web_app_path' => '/var/www/html/scanner',

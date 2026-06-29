@@ -72,6 +72,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 2) {
     $quarPath         = trim($_POST['quarantine_base_path']  ?? '/home/8core_quarantine');
     $logPath          = trim($_POST['log_path']              ?? '/root/8core_scanner/logs');
     $engineSourcePath = trim($_POST['engine_source_path'] ?? '');
+    $webPanelUser     = trim($_POST['web_panel_user']     ?? '8core5');
     $adminUser        = trim($_POST['admin_user']         ?? 'admin');
     $adminPass        = $_POST['admin_pass']              ?? '';
     $adminPass2       = $_POST['admin_pass2']             ?? '';
@@ -141,7 +142,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 2) {
         $rootInstallScript = generateRootInstallScript(
             $srcPlaceholder,
             $rootEngPath, $quarPath, $logPath,
-            $dbHost, $dbName, $dbUser, $dbPass, $dbCharset
+            $dbHost, $dbName, $dbUser, $dbPass, $dbCharset,
+            $webPanelUser
         );
 
         file_put_contents($lockFile, date('Y-m-d H:i:s') . "\n");
@@ -180,6 +182,8 @@ function generateConfigPhp($dbHost, $dbName, $dbUser, $dbPass, $dbCharset,
          . "    'scan_log'         => '" . addslashes($logPath)     . "/ioc-scan-live.log',\n"
          . "    'scan_debug'       => '" . addslashes($logPath)     . "/ioc-debug.log',\n"
          . "    'quarantine_path'  => '" . addslashes($quarPath)    . "',\n"
+         . "\n"
+         . "    'csrf_enabled'     => false,\n"
          . "];\n";
 }
 
@@ -202,8 +206,11 @@ function generateRootInstallScript(
     string $dbName,
     string $dbUser,
     string $dbPass,
-    string $dbCharset
+    string $dbCharset,
+    string $webPanelUser = '8core5'
 ): string {
+    $webPanelGroup = $webPanelUser ?: 'root';
+
     $q_src  = sh_quote($engineSourcePath);
     $q_dst  = sh_quote($rootEngPath);
     $q_quar = sh_quote($quarPath);
@@ -218,6 +225,8 @@ function generateRootInstallScript(
     $c_dst     = sh_quote($rootEngPath);
     $c_quar    = sh_quote($quarPath);
     $c_log     = sh_quote($logPath);
+    $c_wpuser  = sh_quote($webPanelUser);
+    $c_wpgroup = sh_quote($webPanelGroup);
 
     $nl = "\n";
     $s  = '#!/bin/bash' . $nl
@@ -232,6 +241,10 @@ function generateRootInstallScript(
         . 'ROOT_ENGINE_PATH=' . $q_dst  . $nl
         . 'QUARANTINE_BASE_PATH=' . $q_quar . $nl
         . 'LOG_PATH=' . $q_log  . $nl
+        . $nl
+        . '# Web panel korisnik/grupa (za group-readable karantenu)' . $nl
+        . 'WEB_PANEL_USER=' . $c_wpuser  . $nl
+        . 'WEB_PANEL_GROUP=' . $c_wpgroup . $nl
         . $nl
         . '# ─── Provjera izvorne mape ────────────────────────────────────────' . $nl
         . 'if [ ! -f "$ENGINE_SOURCE/ioc_scan.sh" ] || [ ! -f "$ENGINE_SOURCE/scanner_worker.sh" ]; then' . $nl
@@ -266,6 +279,10 @@ function generateRootInstallScript(
         . 'ROOT_ENGINE_PATH=' . $c_dst  . $nl
         . 'QUARANTINE_BASE_PATH=' . $c_quar . $nl
         . 'LOG_PATH=' . $c_log  . $nl
+        . $nl
+        . '# Web panel korisnik/grupa (za read-only pristup karanteni)' . $nl
+        . 'WEB_PANEL_USER=' . $c_wpuser  . $nl
+        . 'WEB_PANEL_GROUP=' . $c_wpgroup . $nl
         . '_8CORE_CONF_END_' . $nl
         . $nl
         . '# ─── Permisije i vlasništvo ──────────────────────────────────────' . $nl
@@ -273,8 +290,13 @@ function generateRootInstallScript(
         . 'chown -R root:root "$ROOT_ENGINE_PATH"' . $nl
         . 'chmod 700 "$ROOT_ENGINE_PATH"' . $nl
         . 'chmod 700 "$LOG_PATH"' . $nl
-        . 'chown root:root "$QUARANTINE_BASE_PATH"' . $nl
-        . 'chmod 700 "$QUARANTINE_BASE_PATH"' . $nl
+        . '# Karantena: root vlasnik, group-readable ako WEB_PANEL_GROUP postoji' . $nl
+        . 'if [ -n "$WEB_PANEL_GROUP" ] && getent group "$WEB_PANEL_GROUP" >/dev/null 2>&1; then' . $nl
+        . '    chown root:"$WEB_PANEL_GROUP" "$QUARANTINE_BASE_PATH"' . $nl
+        . 'else' . $nl
+        . '    chown root:root "$QUARANTINE_BASE_PATH"' . $nl
+        . 'fi' . $nl
+        . 'chmod 750 "$QUARANTINE_BASE_PATH"' . $nl
         . 'chmod 600 "$ROOT_ENGINE_PATH/scanner-db.conf"' . $nl
         . 'chmod +x  "$ROOT_ENGINE_PATH/ioc_scan.sh"' . $nl
         . 'chmod +x  "$ROOT_ENGINE_PATH/scanner_worker.sh"' . $nl
@@ -435,7 +457,7 @@ bash /root/install_8core_scanner.sh</div>
       <ul class="checklist">
         <li><code>ls -lah <?= htmlspecialchars($rootEngPath, ENT_QUOTES, 'UTF-8') ?></code></li>
         <li><code>stat <?= htmlspecialchars($rootEngPath, ENT_QUOTES, 'UTF-8') ?>/scanner-db.conf</code> — mora biti chmod 600</li>
-        <li><code>stat <?= htmlspecialchars($quarPath, ENT_QUOTES, 'UTF-8') ?></code> — karantena mora biti chmod 700, vlasnik root</li>
+        <li><code>stat <?= htmlspecialchars($quarPath, ENT_QUOTES, 'UTF-8') ?></code> — karantena mora biti chmod 750, vlasnik root:WEB_PANEL_GROUP</li>
         <li><code>bash -n <?= htmlspecialchars($rootEngPath, ENT_QUOTES, 'UTF-8') ?>/ioc_scan.sh</code></li>
         <li><code>bash -n <?= htmlspecialchars($rootEngPath, ENT_QUOTES, 'UTF-8') ?>/scanner_worker.sh</code></li>
         <li>Dodaj cron i provjeri log nakon minute</li>
@@ -529,6 +551,11 @@ mv <?= htmlspecialchars(rtrim($webAppPath, '/'), ENT_QUOTES, 'UTF-8') ?>/install
             <label>Logovi (LOG_PATH)</label>
             <input type="text" name="log_path" value="<?= htmlspecialchars($_POST['log_path'] ?? '/root/8core_scanner/logs', ENT_QUOTES) ?>">
           </div>
+        </div>
+        <div class="field">
+          <label>Web panel OS korisnik (WEB_PANEL_USER)</label>
+          <input type="text" name="web_panel_user" value="<?= htmlspecialchars($_POST['web_panel_user'] ?? '8core5', ENT_QUOTES) ?>" placeholder="8core5">
+          <div class="hint">OS korisnik pod kojim radi PHP/web panel (npr. <code>8core5</code>). Koristi se za group-readable karantenu (<code>chmod 750</code>, <code>chown root:WEB_PANEL_GROUP</code>). Provjeri sa <code>id</code> ili <code>ps aux | grep php</code>.</div>
         </div>
 
         <div class="section-sep">Zadani admin korisnik</div>
