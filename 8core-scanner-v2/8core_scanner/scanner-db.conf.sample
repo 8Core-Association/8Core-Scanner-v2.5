@@ -22,3 +22,10 @@ DB_CHARSET="utf8mb4"
 ROOT_ENGINE_PATH="/root/8core_scanner"
 QUARANTINE_BASE_PATH="/home/8core_quarantine"
 LOG_PATH="/root/8core_scanner/logs"
+
+# ── Web panel korisnik/grupa (za read-only pristup karanteni) ──────────────
+# Postavi ako web panel treba čitati karantenu (preview, ignore hash).
+# Worker će postaviti group-readable dozvole (750/640) umjesto 700/600.
+# Ostaviti prazno ako nije potrebno.
+WEB_PANEL_USER='8core5'
+WEB_PANEL_GROUP='8core5'

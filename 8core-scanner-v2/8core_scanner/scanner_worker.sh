@@ -33,6 +33,9 @@ LOG_PATH="${LOG_PATH:-${SCRIPT_DIR}/logs}"
 LOG="${LOG_PATH}/scanner-worker.log"
 QUARANTINE_BASE="${QUARANTINE_BASE_PATH:-${QUARANTINE_PATH:-${SCRIPT_DIR}/quarantine}}"
 
+WEB_PANEL_USER="${WEB_PANEL_USER:-}"
+WEB_PANEL_GROUP="${WEB_PANEL_GROUP:-$WEB_PANEL_USER}"
+
 DB_HOST="${DB_HOST//$'\r'/}"
 DB_NAME="${DB_NAME//$'\r'/}"
 DB_USER="${DB_USER//$'\r'/}"
@@ -58,9 +61,22 @@ safe_home_path() {
   esac
 }
 
+set_quarantine_perms() {
+  local path="$1"
+  local type="$2"
+  if [ -n "$WEB_PANEL_GROUP" ] && getent group "$WEB_PANEL_GROUP" >/dev/null 2>&1; then
+    chown root:"$WEB_PANEL_GROUP" "$path" 2>/dev/null || true
+  fi
+  if [ "$type" = "dir" ]; then
+    chmod 750 "$path"
+  else
+    chmod 640 "$path"
+  fi
+}
+
 prepare_runtime() {
   mkdir -p "$QUARANTINE_BASE"
-  chmod 700 "$QUARANTINE_BASE"
+  set_quarantine_perms "$QUARANTINE_BASE" dir
 }
 
 process_file_actions() {
@@ -96,12 +112,12 @@ process_file_actions() {
       fi
 
       case "$qpath_stored" in
-        /home/8core_quarantine/*)  : ;;
+        "$QUARANTINE_BASE"/*)  : ;;
         *)
           mysql_run "
             UPDATE findings
             SET action_status='restore_failed',
-                action_error='quarantine_path nije unutar /home/8core_quarantine/',
+                action_error='quarantine_path nije unutar dozvoljene baze karantene',
                 action_at=NOW()
             WHERE id=$id;
           "
@@ -192,12 +208,12 @@ process_file_actions() {
       fi
 
       case "$qpath_stored" in
-        /home/8core_quarantine/*)  : ;;
+        "$QUARANTINE_BASE"/*)  : ;;
         *)
           mysql_run "
             UPDATE findings
             SET action_status='purge_failed',
-                action_error='quarantine_path nije unutar /home/8core_quarantine/',
+                action_error='quarantine_path nije unutar dozvoljene baze karantene',
                 action_at=NOW()
             WHERE id=$id;
           "
@@ -296,10 +312,10 @@ process_file_actions() {
       qpath="$qdir/${id}_${ts}_$basefile"
 
       mkdir -p "$qdir"
-      chmod 700 "$qdir"
+      set_quarantine_perms "$qdir" dir
 
       if mv -- "$file" "$qpath"; then
-        chmod 600 "$qpath"
+        set_quarantine_perms "$qpath" file
         mysql_run "
           UPDATE findings
           SET action_status='quarantined',
